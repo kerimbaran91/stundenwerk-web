@@ -143,6 +143,35 @@ check('andere form datum-zeile', r2.shifts[2].date, D(2026, 12, 5));
 check('andere form taetigkeit', r2.shifts[0].activity, 'Objekt Nord');
 check('andere form unerkannt', r2.unrecognized, ['Kerim bitte melden']);
 check('jahreswechsel', RosterParser.parse('Mo 4.1. 16-2 Kerim', ['Kerim'], D(2026, 12, 20)).shifts[0].date, D(2027, 1, 4));
+// Block-Format: Datum, Uhrzeit, Betrag und Namen untereinander
+const block = `Fußball Regensburg
+So 14.5.23
+11-16 Uhr
+5€ extra
+Kerim Nazmi Bülen Enes❓❓❓❓`;
+const rb = RosterParser.parse(block, ['Kerim'], today);
+check('block anzahl', rb.shifts.length, 1);
+check('block datum 2023', rb.shifts[0]?.date, D(2023, 5, 14));
+check('block zeit', [rb.shifts[0]?.startMinutes, rb.shifts[0]?.endMinutes], [660, 960]);
+check('block betrag', rb.shifts[0]?.allowance, 5);
+check('block taetigkeit', rb.shifts[0]?.activity, 'Fußball Regensburg');
+check('block nichts unerkannt', rb.unrecognized, []);
+check('block anderer name', RosterParser.parse(block, ['Nazmi'], today).shifts.length, 1);
+check('block fremder name', RosterParser.parse(block, ['Fuat'], today).shifts.length, 0);
+const blocks = `Fußball Regensburg
+Sa 21.11.
+18-23 Uhr
+Fuat Enes
+So 22.11.
+10-15 Uhr
+Kerim
+Kerim bitte bestätigen`;
+const rbs = RosterParser.parse(blocks, ['Kerim'], today);
+check('mehrere bloecke anzahl (keine doppelten)', rbs.shifts.length, 1);
+check('ohne jahr = aktuelles jahr', rbs.shifts[0]?.date, D(2026, 11, 22));
+check('kein betrag aus altem block', rbs.shifts[0]?.allowance, 0);
+check('block ohne zeit unerkannt', RosterParser.parse('So 22.11.\nKerim Enes', ['Kerim'], today).unrecognized, ['Kerim Enes']);
+check('zeit gilt nicht ueber datum hinaus', RosterParser.parse('So 22.11.\n10-15 Uhr\nMo 23.11.\nKerim', ['Kerim'], today).shifts.length, 0);
 check('namen trennen', RosterParser.splitNames('Kerim, Kerim B.; '), ['Kerim', 'Kerim B.']);
 
 // --- Nächste Schicht

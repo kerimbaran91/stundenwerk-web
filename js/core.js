@@ -358,9 +358,13 @@ export const RosterParser = {
     const unrecognized = [];
     let currentDate = null;
     let currentActivity = '';
+    // Block-Format: Uhrzeit und Betrag stehen in eigenen Zeilen unter dem Datum, die Namen darunter
+    let pendingTime = null;
+    let pendingAmount = null;
+    const resetBlock = () => { pendingTime = null; pendingAmount = null; };
 
     for (const raw of String(text).split(/\r?\n/)) {
-      const line = raw.replace(WHATSAPP_PREFIX, '').replace(/[  ]/g, ' ').trim();
+      const line = raw.replace(WHATSAPP_PREFIX, '').replace(/[\u00A0\u202F]/g, ' ').trim();
       if (!line) continue;
 
       let time = null;
@@ -375,30 +379,49 @@ export const RosterParser = {
         if (d != null) { dateMatch = { m, d }; break; }
       }
       const mine = nameRes.some((r) => r.test(line));
-
-      if (dateMatch && !time && !mine) { currentDate = dateMatch.d; continue; }
-      if (!time && !dateMatch && !mine) {
-        if (LETTERS.test(line) && !/^\d/.test(line) && line.length <= 60) currentActivity = line;
-        continue;
-      }
-      if (!mine) {
-        if (dateMatch) currentDate = dateMatch.d;
-        continue;
-      }
-      const date = dateMatch ? dateMatch.d : currentDate;
-      if (!time || date == null) { unrecognized.push(line); continue; }
-      if (dateMatch) currentDate = date;
-
-      let restForMoney = rest;
-      if (dateMatch) restForMoney = removeRange(restForMoney, dateMatch.m);
+      const restForMoney = dateMatch ? removeRange(rest, dateMatch.m) : rest;
       const am = PLUS_AMOUNT.exec(restForMoney) || EURO_AMOUNT.exec(restForMoney);
-      const amount = am ? parseFloat(am[1].replace(',', '.')) || 0 : 0;
+      const amount = am ? parseFloat(am[1].replace(',', '.')) || 0 : null;
 
-      shifts.push({ date, startMinutes: time.r[0], endMinutes: time.r[1], allowance: amount, activity: currentActivity, line });
+      if (!mine) {
+        if (dateMatch) { currentDate = dateMatch.d; resetBlock(); }
+        if (time) {
+          // Nur reine Zeitzeilen ("11-16 Uhr") gelten für den Block – nicht Zeilen mit anderen Namen
+          if (!hasNames(am ? removeRange(restForMoney, am) : restForMoney)) {
+            pendingTime = time.r;
+            pendingAmount = amount;
+          }
+          continue;
+        }
+        if (dateMatch) continue;
+        if (amount != null) { pendingAmount = amount; continue; }
+        if (LETTERS.test(line) && !/^\d/.test(line) && line.length <= 60) { currentActivity = line; resetBlock(); }
+        continue;
+      }
+
+      const date = dateMatch ? dateMatch.d : currentDate;
+      if (dateMatch && !time) resetBlock();
+      const range = time ? time.r : pendingTime;
+      if (!range || date == null) { unrecognized.push(line); continue; }
+      if (dateMatch) currentDate = date;
+      const fromBlock = !time;
+      // Derselbe Dienst doppelt (z. B. Name in zwei Zeilen eines Blocks) nur einmal übernehmen
+      if (fromBlock && shifts.some((x) => x.date === date && x.startMinutes === range[0] && x.endMinutes === range[1])) continue;
+      shifts.push({
+        date, startMinutes: range[0], endMinutes: range[1],
+        allowance: amount ?? (fromBlock ? pendingAmount ?? 0 : 0),
+        activity: currentActivity, line,
+      });
     }
     return { shifts, unrecognized };
   },
 };
+
+const FILLER = new Set(['uhr', 'bis', 'mo', 'di', 'mi', 'do', 'fr', 'sa', 'so', 'montag', 'dienstag', 'mittwoch', 'donnerstag', 'freitag', 'samstag', 'sonntag']);
+/** Enthält die Zeile (nach Entfernen von Zeit/Datum/Betrag) noch Wörter, z. B. Namen? */
+function hasNames(s) {
+  return (s.match(/\p{L}{2,}/gu) || []).some((w) => !FILLER.has(w.toLowerCase()));
+}
 
 function parseRange(m) {
   const sh = +m[1], sm = +(m[2] || 0), eh = +m[3], em = +(m[4] || 0);

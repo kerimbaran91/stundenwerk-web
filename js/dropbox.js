@@ -131,14 +131,77 @@ export async function upload(json) {
   await up(`${HISTORY_DIR}/Stundenwerk-${today()}.json`);
 }
 
-export async function download() {
+export async function download(path = MAIN_FILE) {
   try {
-    const res = await api('https://content.dropboxapi.com/2/files/download', { arg: { path: MAIN_FILE } });
+    const res = await api('https://content.dropboxapi.com/2/files/download', { arg: { path } });
     return await res.text();
   } catch (e) {
     if (e.status === 409) throw new Error('In Dropbox liegt noch kein Backup.');
     throw e;
   }
+}
+
+// ------------------------------------------------------------------ Verlauf
+
+const KEEP_DAYS = 90;
+
+async function apiJson(url, arg) {
+  const headers = { Authorization: 'Bearer ' + (await token()), 'Content-Type': 'application/json' };
+  const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(arg) });
+  if (!res.ok) {
+    const e = new Error('Dropbox-Fehler ' + res.status);
+    e.status = res.status;
+    throw e;
+  }
+  return res.json();
+}
+
+/** Alle Tageskopien, neueste zuerst: [{ path, date: 'YYYY-MM-DD' }] */
+export async function listHistory() {
+  let r;
+  try {
+    r = await apiJson('https://api.dropboxapi.com/2/files/list_folder', { path: HISTORY_DIR, limit: 2000 });
+  } catch (e) {
+    if (e.status === 409) return []; // Ordner gibt es noch nicht
+    throw e;
+  }
+  const items = [...r.entries];
+  while (r.has_more) {
+    r = await apiJson('https://api.dropboxapi.com/2/files/list_folder/continue', { cursor: r.cursor });
+    items.push(...r.entries);
+  }
+  return items
+    .map((e) => ({ path: e.path_display, m: /Stundenwerk-(\d{4}-\d{2}-\d{2})\.json$/.exec(e.name) }))
+    .filter((x) => x.m)
+    .map((x) => ({ path: x.path, date: x.m[1] }))
+    .sort((a, b) => (a.date < b.date ? 1 : -1));
+}
+
+/**
+ * Aufräumen: Tageskopien der letzten 90 Tage bleiben, ältere nur eine pro Monat (die letzte des Monats).
+ * Jede Kopie enthält immer ALLE Einträge – es gehen keine alten Einträge verloren.
+ */
+export function selectForDeletion(list, today = new Date()) {
+  const limit = new Date(today.getFullYear(), today.getMonth(), today.getDate() - KEEP_DAYS);
+  const limitStr = `${limit.getFullYear()}-${String(limit.getMonth() + 1).padStart(2, '0')}-${String(limit.getDate()).padStart(2, '0')}`;
+  const keptMonths = new Set();
+  const del = [];
+  for (const f of [...list].sort((a, b) => (a.date < b.date ? 1 : -1))) {
+    if (f.date >= limitStr) continue;
+    const month = f.date.slice(0, 7);
+    if (keptMonths.has(month)) del.push(f);
+    else keptMonths.add(month);
+  }
+  return del;
+}
+
+async function cleanup() {
+  if (Date.now() - (status.lastCleanupAt || 0) < 86400000) return;
+  const del = selectForDeletion(await listHistory());
+  for (let i = 0; i < del.length; i += 500) {
+    await apiJson('https://api.dropboxapi.com/2/files/delete_batch', { entries: del.slice(i, i + 500).map((f) => ({ path: f.path })) });
+  }
+  status.lastCleanupAt = Date.now();
 }
 
 // ------------------------------------------------------------------ Automatisch bei jeder Änderung
@@ -166,7 +229,8 @@ export async function syncNow() {
   running = true;
   try {
     await upload(getJson());
-    status = { lastUploadAt: Date.now(), lastError: '', pending: false };
+    status = { ...status, lastUploadAt: Date.now(), lastError: '', pending: false };
+    try { await cleanup(); } catch {} // Aufräumen darf die Sicherung nie stören
   } catch (e) {
     status.lastError = e.message || 'Sicherung fehlgeschlagen.';
     status.pending = true;

@@ -2,7 +2,7 @@ import { Fmt, TimeMath, Calc } from './core.js';
 import { state, Q, saveSettings, saveProfile, replaceAll, onChange } from './store.js';
 import { backupTo, backupFrom } from './backup.js';
 import * as Dropbox from './dropbox.js';
-import { esc, icon, topbar, confirmDialog, dialog, toast } from './ui.js';
+import { esc, icon, topbar, confirmDialog, dialog, toast, actionSheet } from './ui.js';
 import { back } from './nav.js';
 import { download } from './export.js';
 import { APP_VERSION } from './config.js';
@@ -140,7 +140,7 @@ function dropboxSection() {
   if (!Dropbox.connected()) {
     const st = Dropbox.getStatus();
     return `${st.lastError ? `<p class="small bad">${esc(st.lastError)}</p>` : ''}
-      <p class="small">Sichert alle Daten automatisch nach jeder Änderung in deine Dropbox (Ordner „Apps“).</p>
+      <p class="small">Sichert alle Daten automatisch nach jeder Änderung in deine Dropbox (Ordner „Apps“). Tageskopien der letzten 90 Tage bleiben erhalten, ältere als eine Kopie pro Monat.</p>
       <ol class="small steps">
         <li><a class="btn outline" id="dbx-login" href="${esc(authUrl)}" target="_blank" rel="noopener">Bei Dropbox anmelden</a></li>
         <li>„Zulassen“ tippen und den angezeigten <b>Code kopieren</b></li>
@@ -153,7 +153,8 @@ function dropboxSection() {
   return `<div class="row"><div class="grow"><b>Verbunden</b>${Dropbox.account() ? ` · ${esc(Dropbox.account())}` : ''}<div class="small muted">${state_}</div></div></div>
     <div class="btn-list">
       <button class="btn outline" data-act="dbxnow">Jetzt sichern</button>
-      <button class="btn outline" data-act="dbxrestore">Aus Dropbox wiederherstellen</button>
+      <button class="btn outline" data-act="dbxrestore">Neueste Sicherung wiederherstellen</button>
+      <button class="btn outline" data-act="dbxhistory">Aus Verlauf wiederherstellen</button>
       <button class="btn text danger" data-act="dbxdisconnect">Verbindung trennen</button>
     </div>`;
 }
@@ -315,6 +316,25 @@ export function settingsScreen(root) {
       try {
         const text = await Dropbox.download();
         await restore(text, 'Dropbox');
+      } catch (e) {
+        dialog({ title: 'Wiederherstellen fehlgeschlagen', body: `<p>${esc(e.message)}</p>` });
+      }
+    },
+    async dbxhistory() {
+      let list;
+      try {
+        toast('Verlauf wird geladen …', 1500);
+        list = await Dropbox.listHistory();
+      } catch (e) {
+        return dialog({ title: 'Verlauf nicht verfügbar', body: `<p>${esc(e.message)}</p>` });
+      }
+      if (!list.length) return toast('Noch keine Kopien im Verlauf');
+      const fmt = (d) => { const [y, m, dd] = d.split('-'); return `${dd}.${m}.${y}`; };
+      const path = await actionSheet('Stand vom … wiederherstellen', list.map((f) => ({ label: fmt(f.date), value: f.path })));
+      if (!path) return;
+      try {
+        const text = await Dropbox.download(path);
+        await restore(text, 'Stand vom ' + fmt(list.find((f) => f.path === path).date));
       } catch (e) {
         dialog({ title: 'Wiederherstellen fehlgeschlagen', body: `<p>${esc(e.message)}</p>` });
       }

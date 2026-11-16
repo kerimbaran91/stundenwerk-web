@@ -38,7 +38,7 @@ export function rosterScreen(root) {
   const $ = (id) => root.querySelector('#' + id);
   const shiftAt = (i) => edited.get(i) || result.shifts[i];
   const isDup = (s) => state.entries.some((e) => e.date === s.date && e.startMinutes === s.startMinutes);
-  const isSel = (i) => (selected.has(i) ? selected.get(i) : !isDup(shiftAt(i)));
+  const isSel = (i) => (selected.has(i) ? selected.get(i) : !isDup(shiftAt(i)) && (!result.noName || result.looksOwn));
 
   function parse() {
     const names = RosterParser.splitNames($('f-names').value);
@@ -53,9 +53,14 @@ export function rosterScreen(root) {
     const names = $('f-names').value.trim();
     $('b-clear').hidden = !text;
     let html = '';
-    if (!names) html += `<p class="hint bad">Bitte oben deinen Namen eintragen, so wie er im Dienstplan steht.</p>`;
-    if (text.trim() && names) {
-      html += `<h3 class="section-title">${result.shifts.length ? `${result.shifts.length} Schicht${result.shifts.length === 1 ? '' : 'en'} gefunden – antippen zum Anpassen:` : `Keine Schichten mit „${esc(names)}“ gefunden.`}</h3>`;
+    if (!names) html += `<p class="hint">Tipp: Oben deinen Namen eintragen, so wie er im Gruppen-Dienstplan steht.</p>`;
+    if (result.noName) {
+      html += result.looksOwn
+        ? `<div class="banner">${names ? `„${esc(names)}“ steht nicht im Text – ` : ''}alle Schichten werden als deine übernommen.</div>`
+        : `<div class="banner">${names ? `„${esc(names)}“ steht nicht im Text. ` : ''}Die Schichten enthalten andere Namen – bitte nur deine eigenen abhaken.</div>`;
+    }
+    if (text.trim()) {
+      html += `<h3 class="section-title">${result.shifts.length ? `${result.shifts.length} Schicht${result.shifts.length === 1 ? '' : 'en'} gefunden – antippen zum Anpassen:` : names ? `Keine Schichten mit „${esc(names)}“ gefunden.` : 'Keine Schichten gefunden.'}</h3>`;
     }
     result.shifts.forEach((orig, i) => {
       const s = shiftAt(i);
@@ -66,6 +71,7 @@ export function rosterScreen(root) {
           <div class="card-title small">${Fmt.weekday(s.date, true)}, ${Fmt.date(s.date)}</div>
           <div class="line">${TimeMath.formatClock(s.startMinutes)} – ${TimeMath.formatClock(s.endMinutes)}${s.endMinutes < s.startMinutes ? ' <span class="plus1">+1</span>' : ''} · ${TimeMath.formatDuration(TimeMath.workedMinutes(s.startMinutes, s.endMinutes, 0), decimal)} Std.</div>
           ${s.activity ? `<div class="line small muted ellipsis">${esc(s.activity)}</div>` : ''}
+          ${result.noName && !result.looksOwn ? `<div class="line small muted ellipsis">„${esc(s.line)}“</div>` : ''}
           ${dup ? `<div class="line small bad">Schon eingetragen</div>` : ''}
         </div>
         ${s.allowance ? `<span class="chip sprit">${icon('gas', 'tiny')} ${Fmt.allowance(Calc.cents(s.allowance))}</span>` : ''}

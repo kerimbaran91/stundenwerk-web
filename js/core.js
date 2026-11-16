@@ -333,11 +333,23 @@ export const Shifts = {
 // ------------------------------------------------------------------ Dienstplan
 
 const WHATSAPP_PREFIX = /^\[[^\]]{4,30}]\s*[^:]{1,40}:\s*/;
-const TIME_RANGE = /(?<![\d.:])(\d{1,2})(?:[:.](\d{2}))?\s*(?:Uhr)?\s*(?:-|–|—|bis)\s*(\d{1,2})(?:[:.](\d{2}))?(?:\s*Uhr)?(?![\d.:])/gi;
+// Uhrzeit: "16-2", "16:00-02:00", "16.00 – 2.00 Uhr", "16 bis 2", "16h-2h", "1600-0200"
+const TIME_RANGE = /(?<![\d.:/])(\d{1,2})(?:[:.]?(\d{2}))?\s*(?:Uhr|h(?![a-zäöüß]))?\s*(?:-|–|—|bis)\s*(\d{1,2})(?:[:.]?(\d{2}))?(?:\s*(?:Uhr|h(?![a-zäöüß])))?(?![\d.:/])/gi;
+// Datum: "20.11", "20.11.", "20.11.26", "20.11.2026"
 const DATE_RE = /(?<![\d.])(\d{1,2})\.(\d{1,2})(?:\.(\d{4}|\d{2}))?\.?(?!\d)/g;
+// Datum: "20/11", "20/11/2026"
+const DATE_SLASH = /(?<![\d/])(\d{1,2})\/(\d{1,2})(?:\/(\d{4}|\d{2}))?(?![\d/])/g;
+// Datum: "20. November", "20. Nov.", "20 Nov 2026"
+const MONTHS_RE = 'januar|jan|februar|feb|märz|maerz|mär|mrz|april|apr|mai|juni|jun|juli|jul|august|aug|september|sept|sep|oktober|okt|november|nov|dezember|dez';
+const DATE_NAME = new RegExp(`(?<!\\d)(\\d{1,2})\\.?\\s*(${MONTHS_RE})\\.?(?:\\s+(\\d{4}))?(?![\\p{L}])`, 'giu');
+// Datum: "2026-11-20"
+const DATE_ISO = /(?<!\d)(\d{4})-(\d{1,2})-(\d{1,2})(?!\d)/;
 const PLUS_AMOUNT = /\+\s*(\d{1,4}(?:[.,]\d{1,2})?)\s*(?:€|EUR|Euro)?/i;
 const EURO_AMOUNT = /(?<![\d.,])(\d{1,4}(?:[.,]\d{1,2})?)\s*(?:€|EUR\b|Euro\b)/i;
+const WORD_AMOUNT = /(?:sprit(?:geld)?|fahrgeld|fahrtgeld|fahrtkosten|benzin|extra)\s*:?\s*\+?\s*(\d{1,4}(?:[.,]\d{1,2})?)/i;
 const LETTERS = /\p{L}{3,}/u;
+
+const MONTH_NUM = { jan: 1, feb: 2, mär: 3, mae: 3, mrz: 3, apr: 4, mai: 5, jun: 6, jul: 7, aug: 8, sep: 9, okt: 10, nov: 11, dez: 12 };
 
 function escapeRe(s) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -346,82 +358,128 @@ function removeRange(s, m) {
   return s.slice(0, m.index) + s.slice(m.index + m[0].length);
 }
 
+/** Erstes gültiges Datum in der Zeile: { m (Treffer zum Entfernen), d (epochDay) } */
+function findDate(s, today) {
+  for (const re of [DATE_RE, DATE_SLASH]) {
+    for (const m of s.matchAll(re)) {
+      const d = toDate(+m[1], +m[2], m[3] || '', today);
+      if (d != null) return { m, d };
+    }
+  }
+  for (const m of s.matchAll(DATE_NAME)) {
+    const key = m[2].toLowerCase().slice(0, 3);
+    const month = MONTH_NUM[key] ?? MONTH_NUM[m[2].toLowerCase().slice(0, 3).replace('ä', 'ä')];
+    const d = month ? toDate(+m[1], month, m[3] || '', today) : null;
+    if (d != null) return { m, d };
+  }
+  return null;
+}
+
+function findAmount(s) {
+  const m = PLUS_AMOUNT.exec(s) || WORD_AMOUNT.exec(s) || EURO_AMOUNT.exec(s);
+  return m ? { m, v: parseFloat(m[1].replace(',', '.')) || 0 } : null;
+}
+
+const FILLER = new Set(['uhr', 'bis', 'von', 'ab', 'mo', 'di', 'mi', 'do', 'fr', 'sa', 'so', 'montag', 'dienstag', 'mittwoch',
+  'donnerstag', 'freitag', 'samstag', 'sonntag', 'eur', 'euro', 'sprit', 'spritgeld', 'fahrgeld', 'fahrtgeld', 'fahrtkosten', 'benzin', 'extra']);
+/** Enthält der Text (nach Entfernen von Zeit/Datum/Betrag) noch Wörter, z. B. Namen? */
+function hasNames(s) {
+  return (s.match(/\p{L}{2,}/gu) || []).some((w) => !FILLER.has(w.toLowerCase()));
+}
+
 export const RosterParser = {
   splitNames(setting) {
     return String(setting || '').split(/[,;]/).map((s) => s.trim()).filter((s) => s.length >= 2);
   },
 
+  /**
+   * Ergebnis: { shifts, unrecognized, noName, looksOwn }
+   * noName = kein eingestellter Name kommt im Text vor -> alle Schichten gelten als eigene.
+   * looksOwn = in den Schichtzeilen stehen keine weiteren Namen (dann vorausgewählt).
+   */
   parse(text, names, today = todayDay()) {
     const nameRes = names.filter((n) => n.trim()).map((n) => new RegExp('(?<![\\p{L}\\d])' + escapeRe(n.trim()) + '(?![\\p{L}\\d])', 'iu'));
-    if (!nameRes.length) return { shifts: [], unrecognized: [] };
+    const lines = String(text).split(/\r?\n/).map((raw) => raw.replace(WHATSAPP_PREFIX, '').replace(/[  ]/g, ' ').trim());
+    const noName = !lines.some((l) => nameRes.some((r) => r.test(l)));
     const shifts = [];
     const unrecognized = [];
+    let looksOwn = true;
     let currentDate = null;
     let currentActivity = '';
     // Block-Format: Uhrzeit und Betrag stehen in eigenen Zeilen unter dem Datum, die Namen darunter
     let pendingTime = null;
     let pendingAmount = null;
+    let lastShiftLine = -10;
     const resetBlock = () => { pendingTime = null; pendingAmount = null; };
 
-    for (const raw of String(text).split(/\r?\n/)) {
-      const line = raw.replace(WHATSAPP_PREFIX, '').replace(/[\u00A0\u202F]/g, ' ').trim();
-      if (!line) continue;
-
+    lines.forEach((line, idx) => {
+      if (!line) return;
+      // ISO-Datum zuerst herausnehmen, sonst sähe "2026-11-20" wie eine Uhrzeit aus
+      const iso = DATE_ISO.exec(line);
+      let isoDate = null;
+      let work = line;
+      if (iso && validDate(+iso[1], +iso[2], +iso[3])) {
+        isoDate = epochDay(+iso[1], +iso[2], +iso[3]);
+        work = removeRange(line, iso);
+      }
       let time = null;
-      for (const m of line.matchAll(TIME_RANGE)) {
+      for (const m of work.matchAll(TIME_RANGE)) {
         const r = parseRange(m);
         if (r) { time = { m, r }; break; }
       }
-      const rest = time ? removeRange(line, time.m) : line;
-      let dateMatch = null;
-      for (const m of rest.matchAll(DATE_RE)) {
-        const d = toDate(m, today);
-        if (d != null) { dateMatch = { m, d }; break; }
-      }
-      const mine = nameRes.some((r) => r.test(line));
-      const restForMoney = dateMatch ? removeRange(rest, dateMatch.m) : rest;
-      const am = PLUS_AMOUNT.exec(restForMoney) || EURO_AMOUNT.exec(restForMoney);
-      const amount = am ? parseFloat(am[1].replace(',', '.')) || 0 : null;
+      const rest = time ? removeRange(work, time.m) : work;
+      let dateMatch = isoDate != null ? { m: null, d: isoDate } : findDate(rest, today);
+      const restForMoney = dateMatch?.m ? removeRange(rest, dateMatch.m) : rest;
+      const am = findAmount(restForMoney);
+      const amount = am ? am.v : null;
+      const extraWords = hasNames(am ? removeRange(restForMoney, am.m) : restForMoney);
+      // Ohne Namen im Text: jede Zeile mit Uhrzeit ist eine eigene Schicht
+      const mine = noName ? !!time : nameRes.some((r) => r.test(line));
 
       if (!mine) {
         if (dateMatch) { currentDate = dateMatch.d; resetBlock(); }
         if (time) {
           // Nur reine Zeitzeilen ("11-16 Uhr") gelten für den Block – nicht Zeilen mit anderen Namen
-          if (!hasNames(am ? removeRange(restForMoney, am) : restForMoney)) {
+          if (!extraWords) {
             pendingTime = time.r;
             pendingAmount = amount;
           }
-          continue;
+          return;
         }
-        if (dateMatch) continue;
-        if (amount != null) { pendingAmount = amount; continue; }
+        if (dateMatch) return;
+        if (amount != null) {
+          // Betrag in eigener Zeile direkt unter der eigenen Schicht ("5€ extra")
+          if (noName && lastShiftLine === idx - 1 && shifts.length && !shifts.at(-1).allowance) {
+            shifts.at(-1).allowance = amount;
+            lastShiftLine = idx;
+          } else pendingAmount = amount;
+          return;
+        }
+        // Ohne eigenen Namen: Namenszeile direkt unter einer Schicht -> Gruppenplan, nicht vorauswählen
+        if (noName && lastShiftLine === idx - 1) { looksOwn = false; return; }
         if (LETTERS.test(line) && !/^\d/.test(line) && line.length <= 60) { currentActivity = line; resetBlock(); }
-        continue;
+        return;
       }
 
       const date = dateMatch ? dateMatch.d : currentDate;
       if (dateMatch && !time) resetBlock();
       const range = time ? time.r : pendingTime;
-      if (!range || date == null) { unrecognized.push(line); continue; }
+      if (!range || date == null) { unrecognized.push(line); return; }
       if (dateMatch) currentDate = date;
       const fromBlock = !time;
       // Derselbe Dienst doppelt (z. B. Name in zwei Zeilen eines Blocks) nur einmal übernehmen
-      if (fromBlock && shifts.some((x) => x.date === date && x.startMinutes === range[0] && x.endMinutes === range[1])) continue;
+      if (fromBlock && shifts.some((x) => x.date === date && x.startMinutes === range[0] && x.endMinutes === range[1])) return;
+      if (noName && extraWords) looksOwn = false;
       shifts.push({
         date, startMinutes: range[0], endMinutes: range[1],
         allowance: amount ?? (fromBlock ? pendingAmount ?? 0 : 0),
         activity: currentActivity, line,
       });
-    }
-    return { shifts, unrecognized };
+      lastShiftLine = idx;
+    });
+    return { shifts, unrecognized, noName: noName && shifts.length > 0, looksOwn };
   },
 };
-
-const FILLER = new Set(['uhr', 'bis', 'mo', 'di', 'mi', 'do', 'fr', 'sa', 'so', 'montag', 'dienstag', 'mittwoch', 'donnerstag', 'freitag', 'samstag', 'sonntag']);
-/** Enthält die Zeile (nach Entfernen von Zeit/Datum/Betrag) noch Wörter, z. B. Namen? */
-function hasNames(s) {
-  return (s.match(/\p{L}{2,}/gu) || []).some((w) => !FILLER.has(w.toLowerCase()));
-}
 
 function parseRange(m) {
   const sh = +m[1], sm = +(m[2] || 0), eh = +m[3], em = +(m[4] || 0);
@@ -432,10 +490,9 @@ function parseRange(m) {
   return [start, end];
 }
 
-function toDate(m, today) {
-  const day = +m[1], month = +m[2];
+/** Ohne Jahr: das Jahr wählen, bei dem das Datum am nächsten an heute liegt (Dez.-Plan für Januar usw.). */
+function toDate(day, month, y, today) {
   if (month < 1 || month > 12 || day < 1 || day > 31) return null;
-  const y = m[3] || '';
   if (y) {
     const year = y.length === 2 ? 2000 + +y : +y;
     return validDate(year, month, day) ? epochDay(year, month, day) : null;

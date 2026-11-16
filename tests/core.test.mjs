@@ -126,8 +126,10 @@ check('plan taetigkeit', r.shifts[0].activity, 'Flüchtlingsunterkunft Steinburg
 check('plan jahr', ymd(r.shifts[0].date).y, 2026);
 check('plan nichts unerkannt', r.unrecognized, []);
 check('plan andere namen', RosterParser.parse(plan, ['Fuat'], today).shifts.length, 2);
-check('kein name gesetzt', RosterParser.parse(plan, [], today).shifts.length, 0);
-check('name teilwort', RosterParser.parse('Mo 2.11. 16-2 Kerimo', ['Kerim'], today).shifts.length, 0);
+const rn = RosterParser.parse(plan, [], today);
+check('kein name gesetzt: alle, aber nicht vorausgewaehlt', [rn.noName, rn.looksOwn], [true, false]);
+const rt = RosterParser.parse('Mo 2.11. 16-2 Kerimo', ['Kerim'], today);
+check('name teilwort zaehlt nicht als eigener name', [rt.noName, rt.looksOwn], [true, false]);
 const other = `[12.11.26, 22:03] Chef: Objekt Nord
 02.12.2026 16:00-02:00 Kerim
 Fr 04.12. 14.30 – 22.30 Uhr Kerim Sprit 12 €
@@ -157,7 +159,8 @@ check('block betrag', rb.shifts[0]?.allowance, 5);
 check('block taetigkeit', rb.shifts[0]?.activity, 'Fußball Regensburg');
 check('block nichts unerkannt', rb.unrecognized, []);
 check('block anderer name', RosterParser.parse(block, ['Nazmi'], today).shifts.length, 1);
-check('block fremder name', RosterParser.parse(block, ['Fuat'], today).shifts.length, 0);
+const rf = RosterParser.parse(block, ['Fuat'], today);
+check('block fremder name: nicht vorausgewaehlt', [rf.noName, rf.looksOwn], [true, false]);
 const blocks = `Fußball Regensburg
 Sa 21.11.
 18-23 Uhr
@@ -172,6 +175,32 @@ check('ohne jahr = aktuelles jahr', rbs.shifts[0]?.date, D(2026, 11, 22));
 check('kein betrag aus altem block', rbs.shifts[0]?.allowance, 0);
 check('block ohne zeit unerkannt', RosterParser.parse('So 22.11.\nKerim Enes', ['Kerim'], today).unrecognized, ['Kerim Enes']);
 check('zeit gilt nicht ueber datum hinaus', RosterParser.parse('So 22.11.\n10-15 Uhr\nMo 23.11.\nKerim', ['Kerim'], today).shifts.length, 0);
+// Eigener Plan ohne Namen + weitere Schreibweisen
+const own1 = RosterParser.parse('Flüchtlinglager\n\n20.11 16-02', ['Kerim'], today);
+check('ohne name', own1.shifts.map((x) => [x.date, x.startMinutes, x.endMinutes, x.allowance, x.activity]), [[D(2026, 11, 20), 960, 120, 0, 'Flüchtlinglager']]);
+check('ohne name flags', [own1.noName, own1.looksOwn], [true, true]);
+check('ohne name +5', RosterParser.parse('Flüchtlinglager\n\n20.11 16-02 +5', ['Kerim'], today).shifts[0]?.allowance, 5);
+check('ohne name (+5)', RosterParser.parse('Flüchtlinglager\n\n20.11 16-02 (+5)', ['Kerim'], today).shifts[0]?.allowance, 5);
+check('(5€)', RosterParser.parse('20.11 16-02 (5€)', [], today).shifts[0]?.allowance, 5);
+check('(Sprit 5)', RosterParser.parse('20.11 16-02 (Sprit 5)', [], today).shifts[0]?.allowance, 5);
+check('Fahrgeld 12,50', RosterParser.parse('20.11. 16-02 Fahrgeld 12,50', [], today).shifts[0]?.allowance, 12.5);
+check('(Sprit 5) vorausgewaehlt', RosterParser.parse('20.11 16-02 (Sprit 5)', [], today).looksOwn, true);
+const v = (t) => { const x = RosterParser.parse(t, ['Kerim'], today).shifts[0]; return x ? [x.date, x.startMinutes, x.endMinutes] : null; };
+check('20/11', v('20/11 16-02 Kerim'), [D(2026, 11, 20), 960, 120]);
+check('20/11/2026', v('20/11/2026 16-02 Kerim'), [D(2026, 11, 20), 960, 120]);
+check('20. November', v('20. November 16-2 Kerim'), [D(2026, 11, 20), 960, 120]);
+check('20. Nov.', v('Fr 20. Nov. 16-2 Kerim'), [D(2026, 11, 20), 960, 120]);
+check('Freitag, 20.11.', v('Freitag, 20.11. 16-2 Kerim'), [D(2026, 11, 20), 960, 120]);
+check('2026-11-20', v('2026-11-20 16-2 Kerim'), [D(2026, 11, 20), 960, 120]);
+check('16h-2h', v('20.11. 16h-2h Kerim'), [D(2026, 11, 20), 960, 120]);
+check('1600-0200', v('20.11. 1600-0200 Kerim'), [D(2026, 11, 20), 960, 120]);
+check('16:00h – 02:00h', v('20.11. 16:00h – 02:00h Kerim'), [D(2026, 11, 20), 960, 120]);
+check('von 16 bis 2 Uhr', v('20.11. von 16 bis 2 Uhr Kerim'), [D(2026, 11, 20), 960, 120]);
+check('6:30-14:30', v('20.11. 6:30-14:30 Kerim'), [D(2026, 11, 20), 390, 870]);
+check('März', v('3. März 2027 8-16 Kerim'), [D(2027, 3, 3), 480, 960]);
+check('eigene Bloecke ohne Namen', RosterParser.parse('So 22.11.\n10-15 Uhr\nMo 23.11.\n16-2 +15', [], today).shifts.map((x) => [ymd(x.date).d, x.allowance]), [[22, 0], [23, 15]]);
+check('betrag naechste zeile ohne namen', RosterParser.parse('20.11 16-02\n5€ extra', [], today).shifts[0]?.allowance, 5);
+check('PLZ ist keine zeit', RosterParser.parse('94336 Hunderdorf\n20.11 16-02', [], today).shifts.length, 1);
 check('namen trennen', RosterParser.splitNames('Kerim, Kerim B.; '), ['Kerim', 'Kerim B.']);
 
 // --- Nächste Schicht

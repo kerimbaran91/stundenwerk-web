@@ -7,6 +7,7 @@
   --outline: #6F7975; --outline-v: #BFC9C4;
   --error: #BA1A1A; --error-c: #FFDAD6;
   --warn-c: #FFF3CD;
+  --weekend: #C62828;
   --shadow: 0 1px 2px rgba(0,0,0,.06);
   color-scheme: light;
 }
@@ -17,7 +18,7 @@
     --bg: #0F1312; --on-bg: #DDE4E1; --muted: #B9C6C1;
     --s1: #161C1A; --s2: #1A211F; --s3: #212927; --s4: #2B3431;
     --outline: #7D8A86; --outline-v: #3A4643;
-    --error: #FFB4AB; --error-c: #5C1A14; --warn-c: #3D3418;
+    --error: #FFB4AB; --error-c: #5C1A14; --warn-c: #3D3418; --weekend: #FF6B6B;
     --shadow: none;
     color-scheme: dark;
   }
@@ -28,7 +29,7 @@
   --bg: #0F1312; --on-bg: #DDE4E1; --muted: #B9C6C1;
   --s1: #161C1A; --s2: #1A211F; --s3: #212927; --s4: #2B3431;
   --outline: #7D8A86; --outline-v: #3A4643;
-  --error: #FFB4AB; --error-c: #5C1A14; --warn-c: #3D3418;
+  --error: #FFB4AB; --error-c: #5C1A14; --warn-c: #3D3418; --weekend: #FF6B6B;
   --shadow: none;
   color-scheme: dark;
 }
@@ -333,3 +334,7 @@ input.search { margin-bottom: 0; flex: none; }
 .dbx-line .ic { fill: currentColor; }
 .dbx-line.ok { color: var(--primary); }
 #dbx-home:empty { display: none; }
+
+/* Samstag und Sonntag: Wochentag und Datum in roter Schrift */
+.card.day.we .card-title, .card.day.we .card-date { color: var(--weekend); opacity: 1; }
+.card.day.we.is-next .card-title, .card.day.we.is-next .card-date { color: var(--weekend); opacity: 1; }

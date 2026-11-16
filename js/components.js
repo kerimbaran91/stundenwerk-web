@@ -40,7 +40,7 @@ export function dayCard(e, hourlyRate, decimal, { compact = false, badge = '', a
   const wage = Calc.dayWageCents(e, hourlyRate);
   const allowance = Calc.cents(e.allowance);
   const extra = [e.workplace, e.note, e.auk].filter((x) => (x || '').trim()).join(' · ');
-  return `<div class="card day ${badge ? 'is-next' : isWeekend(e.date) ? 'weekend' : ''} ${compact ? 'compact' : ''}" data-act="${esc(act)}" data-entry="${e.id}">
+  return `<div class="card day ${badge ? 'is-next' : isWeekend(e.date) ? 'weekend' : ''} ${isWeekend(e.date) ? 'we' : ''} ${compact ? 'compact' : ''}" data-act="${esc(act)}" data-entry="${e.id}">
     <div class="row top">
       <div class="grow">
         ${badge ? `<span class="badge">${esc(badge)}</span>` : ''}

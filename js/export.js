@@ -19,7 +19,7 @@ export function exportScreen(root, kind, id) {
   }
   const data = months.map((m) => ({ month: m, entries: Q.entriesOf(m.id), profile: Q.profileOf(m) }));
   const hasTarget = data.some((d) => d.profile?.targetMinutes > 0);
-  const baseName = 'Stundenwerk_' + title.replace(/ /g, '_');
+  const baseName = title.replace(/ /g, '_'); // z. B. November_2026 bzw. 2026
   let cfg = normalizeExportConfig(JSON.parse(JSON.stringify(state.exportConfig)));
 
   const sw = (key, label) => `<label class="switch"><input type="checkbox" data-k="${key}" ${cfg[key] ? 'checked' : ''}><span>${esc(label)}</span></label>`;

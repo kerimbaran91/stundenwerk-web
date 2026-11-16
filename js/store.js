@@ -203,7 +203,7 @@ export async function importShifts(shifts) {
       const { y, m } = ymd(s.date);
       month = {
         id: nextId(state.months), year: y, month: m,
-        hourlyRate: latest?.hourlyRate ?? profile?.hourlyRate ?? 0,
+        hourlyRate: profile?.hourlyRate > 0 ? profile.hourlyRate : latest?.hourlyRate ?? 0,
         profileId: latest?.profileId ?? profile?.id ?? null, periodStart: null, periodEnd: null,
       };
       state.months.push(month);

@@ -52,8 +52,9 @@ export function parseIsoDate(s) {
 
 export const TimeMath = {
   spanMinutes(start, end) {
+    // Ende vor Beginn = über Mitternacht; gleiche Zeit = 24-Stunden-Schicht
     const diff = end - start;
-    return diff < 0 ? diff + MINUTES_PER_DAY : diff;
+    return diff <= 0 ? diff + MINUTES_PER_DAY : diff;
   },
   workedMinutes(start, end, brk) {
     return Math.max(0, TimeMath.spanMinutes(start, end) - Math.max(0, brk));
@@ -223,7 +224,7 @@ export const Entries = {
     return e.hourlyRate ?? monthRate;
   },
   isOvernight(e) {
-    return e.endMinutes < e.startMinutes;
+    return e.endMinutes <= e.startMinutes;
   },
 };
 
@@ -486,8 +487,7 @@ function parseRange(m) {
   if (sh > 24 || eh > 24 || sm > 59 || em > 59) return null;
   const start = (sh * 60 + sm) % MINUTES_PER_DAY;
   const end = (eh * 60 + em) % MINUTES_PER_DAY;
-  if (start === end) return null;
-  return [start, end];
+  return [start, end]; // gleiche Zeit = 24-Stunden-Schicht
 }
 
 /** Ohne Jahr: das Jahr wählen, bei dem das Datum am nächsten an heute liegt (Dez.-Plan für Januar usw.). */

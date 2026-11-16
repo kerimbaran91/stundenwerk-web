@@ -2,7 +2,7 @@ import { Calc, Fmt, Months, Shifts, Search, nowStamp, todayDay } from './core.js
 import { state, Q, load, onChange, deleteMonth, saveSettings } from './store.js';
 import { esc, icon, topbar, actionSheet, confirmDialog, toast } from './ui.js';
 import { summaryBar, statsCard, dayCard, nextShiftCard, emptyState, fab } from './components.js';
-import { route, go, back, setRenderer, restoreScroll, saveScroll } from './nav.js';
+import { route, go, back, start, setRenderer, restoreScroll, saveScroll } from './nav.js';
 import { dayEditScreen, monthEditScreen } from './edit.js';
 import { rosterScreen } from './roster.js';
 import { exportScreen } from './export.js';
@@ -266,7 +266,7 @@ export function render() {
       case 'export': handlers = exportScreen(root, r[1], +r[2]); break;
       case 'settings': handlers = settingsScreen(root); break;
       case 'search': handlers = searchScreen(ctx); break;
-      default: location.replace('#/'); return;
+      default: go('', { replace: true }); return;
     }
   } catch (e) {
     console.error(e);
@@ -334,11 +334,9 @@ async function boot() {
   onChange(() => applyTheme());
   setRenderer(render);
   // Beim Öffnen direkt die Monate des aktuellen Jahres zeigen; Zurück führt zur Jahresübersicht
-  if (!location.hash || location.hash === '#/' || location.hash === '#') {
-    const y = startYear();
-    if (y) history.replaceState(null, '', '#/year/' + y);
-  }
-  render();
+  const atHome = !location.hash || location.hash === '#/' || location.hash === '#';
+  const y = atHome ? startYear() : null;
+  start(y ? 'year/' + y : null);
   installHint();
 }
 

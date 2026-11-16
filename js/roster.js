@@ -69,7 +69,7 @@ export function rosterScreen(root) {
         <label class="check" data-stop><input type="checkbox" data-sel="${i}" ${isSel(i) ? 'checked' : ''}></label>
         <div class="grow">
           <div class="card-title small">${Fmt.weekday(s.date, true)}, ${Fmt.date(s.date)}</div>
-          <div class="line">${TimeMath.formatClock(s.startMinutes)} – ${TimeMath.formatClock(s.endMinutes)}${s.endMinutes < s.startMinutes ? ' <span class="plus1">+1</span>' : ''} · ${TimeMath.formatDuration(TimeMath.workedMinutes(s.startMinutes, s.endMinutes, 0), decimal)} Std.</div>
+          <div class="line">${TimeMath.formatClock(s.startMinutes)} – ${TimeMath.formatClock(s.endMinutes)}${s.endMinutes <= s.startMinutes ? ' <span class="plus1">+1</span>' : ''} · ${TimeMath.formatDuration(TimeMath.workedMinutes(s.startMinutes, s.endMinutes, 0), decimal)} Std.</div>
           ${s.activity ? `<div class="line small muted ellipsis">${esc(s.activity)}</div>` : ''}
           ${result.noName && !result.looksOwn ? `<div class="line small muted ellipsis">„${esc(s.line)}“</div>` : ''}
           ${dup ? `<div class="line small bad">Schon eingetragen</div>` : ''}

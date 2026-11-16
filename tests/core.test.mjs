@@ -14,7 +14,8 @@ const at = (y, mo, d, h, mi) => D(y, mo, d) * MINUTES_PER_DAY + h * 60 + mi;
 check('span normal', TimeMath.spanMinutes(420, 900), 480);
 check('span nacht 16-02', TimeMath.spanMinutes(960, 120), 600);
 check('span nacht 22-06', TimeMath.spanMinutes(1320, 360), 480);
-check('span gleich', TimeMath.spanMinutes(600, 600), 0);
+check('span gleich = 24 h', TimeMath.spanMinutes(600, 600), 1440);
+check('24h mit pause', TimeMath.workedMinutes(360, 360, 60), 1380);
 check('worked mit pause', TimeMath.workedMinutes(420, 900, 30), 450);
 check('worked pause > dauer', TimeMath.workedMinutes(600, 630, 60), 0);
 check('parse 7', TimeMath.parseClock('7'), 420);
@@ -201,6 +202,8 @@ check('März', v('3. März 2027 8-16 Kerim'), [D(2027, 3, 3), 480, 960]);
 check('eigene Bloecke ohne Namen', RosterParser.parse('So 22.11.\n10-15 Uhr\nMo 23.11.\n16-2 +15', [], today).shifts.map((x) => [ymd(x.date).d, x.allowance]), [[22, 0], [23, 15]]);
 check('betrag naechste zeile ohne namen', RosterParser.parse('20.11 16-02\n5€ extra', [], today).shifts[0]?.allowance, 5);
 check('PLZ ist keine zeit', RosterParser.parse('94336 Hunderdorf\n20.11 16-02', [], today).shifts.length, 1);
+check('24h im plan', RosterParser.parse('20.11. 6-6 Kerim', ['Kerim'], today).shifts.map((x) => [x.startMinutes, x.endMinutes]), [[360, 360]]);
+check('24h schicht laeuft', Shifts.isRunning({ id: 9, date: D(2026, 11, 20), startMinutes: 360, endMinutes: 360 }, at(2026, 11, 21, 5, 0)), true);
 check('namen trennen', RosterParser.splitNames('Kerim, Kerim B.; '), ['Kerim', 'Kerim B.']);
 
 // --- Nächste Schicht

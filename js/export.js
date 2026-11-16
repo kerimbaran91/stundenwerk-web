@@ -2,7 +2,7 @@ import { ExportBuilder, Fmt, Calc, COLUMNS, columnTitle, normalizeExportConfig }
 import { state, Q, saveExportConfig } from './store.js';
 import { esc, icon, topbar, toast } from './ui.js';
 import { back } from './nav.js';
-import { buildPdf, safeFileName } from './pdf.js';
+import { buildPdf, safeFileName, loadFonts } from './pdf.js';
 
 /** Monat oder Jahr als PDF: wichtigste Einstellungen, Vorschau, Teilen über das iPhone-Teilen-Menü. */
 export function exportScreen(root, kind, id) {
@@ -126,6 +126,7 @@ export function exportScreen(root, kind, id) {
   });
   syncSubs();
   preview();
+  loadFonts(); // Schrift fürs PDF schon jetzt laden
 
   function makeFile() {
     const pdf = buildPdf(doc());

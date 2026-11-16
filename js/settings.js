@@ -3,7 +3,7 @@ import { state, Q, saveSettings, saveProfile, replaceAll, onChange } from './sto
 import { backupTo, backupFrom } from './backup.js';
 import * as Dropbox from './dropbox.js';
 import { esc, icon, topbar, confirmDialog, dialog, toast, actionSheet } from './ui.js';
-import { back } from './nav.js';
+import { back, go } from './nav.js';
 import { download } from './export.js';
 import { APP_VERSION } from './config.js';
 
@@ -127,7 +127,7 @@ document.addEventListener('click', async (ev) => {
     }
   }
   const g = ev.target.closest('[data-go]');
-  if (g) location.hash = '#/' + g.dataset.go;
+  if (g) go(g.dataset.go);
 });
 
 // ------------------------------------------------------------------ Hinweis „Zum Home-Bildschirm“
@@ -405,7 +405,11 @@ async function decideAfterConnect() {
     return;
   }
   const local = state.entries.length;
-  if (!info || (local > 0 && info.entries <= local)) {
+  // Ohne Frage nur sichern, wenn wirklich alle Tage aus dem Backup auch auf diesem iPhone sind
+  const key = (e) => [e.date, e.startMinutes, e.endMinutes, e.breakMinutes || 0, e.allowance || 0, (e.activity || '').trim()].join('|');
+  const have = new Set(state.entries.map(key));
+  const contained = !!info && info.backup.entries.every((e) => have.has(key(e)));
+  if (!info || contained) {
     await Dropbox.setBaseline(info ? info.entries : null);
     await Dropbox.syncNow({ force: true });
     return;
@@ -427,7 +431,7 @@ async function decideAfterConnect() {
     await Dropbox.setBaseline(info.entries);
     await replaceAll(info.backup);
     toast('Backup wiederhergestellt');
-    setTimeout(() => location.replace('#/'), 300);
+    setTimeout(() => go('', { replace: true }), 300);
   } else {
     if (!(await confirmDialog('iPhone-Daten behalten?', `Das Backup in Dropbox (${info.entries} Tage) wird mit den ${local} Tagen von diesem iPhone überschrieben. Ältere Tageskopien im Verlauf bleiben erhalten.`, 'Überschreiben', true))) {
       return decideAfterConnect();
@@ -450,5 +454,5 @@ async function restore(text, source) {
   await Dropbox.setBaseline(b.entries.length); // bewusst wiederhergestellt -> neuer Vergleichswert
   await replaceAll(b);
   toast('Backup wiederhergestellt');
-  setTimeout(() => location.replace('#/'), 300);
+  setTimeout(() => go('', { replace: true }), 300);
 }

@@ -7,10 +7,58 @@ const MARGIN = 36;
 const ROW_H = 15.5;
 const HEADER_H = 17;
 const FONT = 8.6;
+const FAMILY = 'LiberationSans';
+
+// Eingebettete Schrift (Liberation Sans, sieht aus wie Helvetica/Arial) – damit auch türkische Buchstaben
+// wie ş, ğ, ı, İ im PDF stimmen. Die Standardschrift von PDF kann nur westeuropäische Zeichen.
+let fonts = null; // { normal, bold } als Base64
+let fontsLoading = null;
+
+function toBase64(buf) {
+  const b = new Uint8Array(buf);
+  let s = '';
+  for (let i = 0; i < b.length; i += 0x8000) s += String.fromCharCode.apply(null, b.subarray(i, i + 0x8000));
+  return btoa(s);
+}
+
+/** Schrift vorab laden (beim Öffnen der Teilen-Seite), damit das Teilen direkt im Antippen klappt. */
+export function loadFonts() {
+  if (fonts) return Promise.resolve(true);
+  if (!fontsLoading) {
+    const get = (f) => fetch('fonts/' + f).then((r) => (r.ok ? r.arrayBuffer() : Promise.reject(new Error('Schrift fehlt')))).then(toBase64);
+    fontsLoading = Promise.all([get('LiberationSans-Regular.ttf'), get('LiberationSans-Bold.ttf')])
+      .then(([normal, bold]) => { fonts = { normal, bold }; return true; })
+      .catch(() => { fontsLoading = null; return false; });
+  }
+  return fontsLoading;
+}
+
+const TRANSLIT = { ş: 's', Ş: 'S', ğ: 'g', Ğ: 'G', ı: 'i', İ: 'I', ć: 'c', Ć: 'C', č: 'c', Č: 'C', ž: 'z', Ž: 'Z', đ: 'd', Đ: 'D', ł: 'l', Ł: 'L' };
+
+/** Nur Zeichen behalten, die die Schrift darstellen kann (Emojis usw. fallen weg). */
+export function cleanText(text, embedded) {
+  let s = String(text ?? '').normalize('NFC');
+  if (!embedded) s = s.replace(/[^\u0000-\u00FF]/g, (c) => TRANSLIT[c] ?? c).replace(/[^\u0020-\u007E\u00A0-\u00FF\u2013\u2014\u2018-\u201E\u2026\u20AC]/g, '');
+  else s = s.replace(/[^\u0020-\u007E\u00A0-\u024F\u2010-\u2026\u20AC]/gu, '');
+  return s.replace(/ {2,}/g, ' ').trim();
+}
 
 export function buildPdf(doc) {
   const { jsPDF } = window.jspdf;
   const pdf = new jsPDF({ unit: 'pt', format: 'a4', orientation: 'portrait', compress: true });
+  const embedded = !!fonts;
+  if (embedded) {
+    pdf.addFileToVFS('LiberationSans-Regular.ttf', fonts.normal);
+    pdf.addFont('LiberationSans-Regular.ttf', FAMILY, 'normal');
+    pdf.addFileToVFS('LiberationSans-Bold.ttf', fonts.bold);
+    pdf.addFont('LiberationSans-Bold.ttf', FAMILY, 'bold');
+  }
+  const family = embedded ? FAMILY : 'helvetica';
+  const setFont = pdf.setFont.bind(pdf);
+  pdf.setFont = (_name, style) => setFont(family, style);
+  const text = pdf.text.bind(pdf);
+  pdf.text = (t, ...rest) => text(cleanText(t, embedded), ...rest);
+  pdf.swClean = (t) => cleanText(t, embedded);
   pdf.setProperties({ title: doc.fileBaseName, creator: 'Stundenwerk' });
   let pageNo = 0;
   let first = true;
@@ -113,7 +161,7 @@ function cellText(pdf, text, x, w, y, h, align, bold) {
   if (!text) return;
   const pad = 3;
   pdf.setFont('helvetica', bold ? 'bold' : 'normal').setFontSize(FONT).setTextColor(0);
-  const fitted = ellipsize(pdf, String(text), w - 2 * pad);
+  const fitted = ellipsize(pdf, pdf.swClean(text), w - 2 * pad);
   const baseline = y + h / 2 + FONT * 0.35;
   if (align === 'LEFT') pdf.text(fitted, x + pad, baseline);
   else if (align === 'RIGHT') pdf.text(fitted, x + w - pad, baseline, { align: 'right' });

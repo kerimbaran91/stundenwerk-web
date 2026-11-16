@@ -21,5 +21,5 @@ Läuft komplett im Browser, ohne Server. Die Daten liegen nur auf dem Gerät (pl
 - Reines HTML/CSS/JavaScript (ES-Module), kein Build-Schritt. Hosting über GitHub Pages.
 - `js/core.js`: Rechenlogik und Dienstplan-Parser, 1:1 aus der Android-App übertragen. Tests: `node tests/core.test.mjs`
 - `js/config.js`: Dropbox-App-Key.
-- PDF: [jsPDF](https://github.com/parallax/jsPDF) (MIT), liegt unter `vendor/`.
+- PDF: [jsPDF](https://github.com/parallax/jsPDF) (MIT), liegt unter `vendor/`. Schrift im PDF: Liberation Sans (SIL Open Font License), verkleinert unter `fonts/` – damit auch türkische Buchstaben stimmen.
 - Offline-Betrieb über `sw.js`. **Bei jeder neuen Version `VERSION` in `sw.js` erhöhen**, sonst bekommen die Geräte das Update nicht.

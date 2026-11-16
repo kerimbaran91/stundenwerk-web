@@ -1,11 +1,28 @@
-// Navigation über die Adresse (#/monat/3 …). Auf dem iPhone gibt es in Home-Bildschirm-Apps
-// keine Zurück-Geste des Browsers – deshalb hat jede Seite einen eigenen Zurück-Knopf.
+// Navigation über die Adresse (#/month/3 …). Jede Seite hat einen eigenen Zurück-Knopf.
+// Die Position im Verlauf steht im Verlaufseintrag selbst (history.state.idx) – so stimmt der Zurück-Knopf
+// auch nach der Wischgeste vom Bildschirmrand oder nach dem Neuladen.
 
-let depth = 0;
 let renderFn = () => {};
+let shown = null;
 const scrolls = new Map();
 
+const idx = () => history.state?.idx ?? 0;
+
 export function setRenderer(fn) { renderFn = fn; }
+
+/** Zeigt die Seite zur aktuellen Adresse (nur wenn sie sich geändert hat). */
+function fire() {
+  if (location.hash === shown) return;
+  shown = location.hash;
+  renderFn();
+}
+
+/** Beim Start: erste Seite anzeigen. */
+export function start(path = null) {
+  if (path != null) history.replaceState({ idx: idx() }, '', '#/' + path);
+  shown = location.hash;
+  renderFn();
+}
 
 export function route() {
   return (location.hash.replace(/^#\/?/, '') || '').split('/').filter(Boolean);
@@ -14,21 +31,18 @@ export function route() {
 export function go(path, { replace = false } = {}) {
   saveScroll();
   const h = '#/' + path;
-  if (replace) location.replace(h);
-  else {
-    depth++;
-    location.hash = h;
-  }
+  if (replace) history.replaceState({ idx: idx() }, '', h);
+  else if (location.hash !== h) history.pushState({ idx: idx() + 1 }, '', h);
+  fire();
 }
 
-/** Zurück: in der App-Historie, sonst zur übergeordneten Seite. */
-export function back(parent = '') {
+/** Zurück: n Schritte im App-Verlauf, sonst zur übergeordneten Seite. */
+export function back(parent = '', n = 1) {
   saveScroll();
-  if (depth > 0) {
-    depth--;
-    history.back();
-  } else {
-    location.replace('#/' + parent);
+  if (idx() >= n) history.go(-n);
+  else {
+    history.replaceState({ idx: 0 }, '', '#/' + parent);
+    fire();
   }
 }
 
@@ -43,4 +57,5 @@ export function restoreScroll() {
   return y != null;
 }
 
-addEventListener('hashchange', () => renderFn());
+addEventListener('popstate', fire);
+addEventListener('hashchange', fire);

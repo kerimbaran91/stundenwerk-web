@@ -3,6 +3,12 @@ import { state, Q, saveEntry, deleteEntry, saveMonth, deleteMonth } from './stor
 import { esc, icon, topbar, confirmDialog, toast } from './ui.js';
 import { back, go } from './nav.js';
 
+/** Stundenlohn für neue Monate: Standardwert aus den Einstellungen, sonst der des letzten Monats. */
+export function defaultRate() {
+  const p = Q.profile();
+  return p?.hourlyRate > 0 ? p.hourlyRate : Q.latestMonth()?.hourlyRate ?? 0;
+}
+
 const clock = (min) => TimeMath.formatClock(min);
 const parseTime = (v) => (v ? TimeMath.parseClock(v) : null);
 
@@ -68,6 +74,7 @@ export function dayEditScreen(root, monthId, entryId) {
           <label class="field"><span>Beginn</span><input type="time" id="f-start" value="${clock(t.startMinutes)}"></label>
           <label class="field"><span>Ende</span><input type="time" id="f-end" value="${clock(t.endMinutes)}"></label>
         </div>
+        <div class="err" id="e-time"></div>
         <label class="field"><span>Pause</span><input id="f-break" inputmode="decimal" placeholder="Minuten, z. B. 30 oder 0:45" value="${t.breakMinutes ? TimeMath.formatDuration(t.breakMinutes, false) : ''}"></label>
         <div class="help" id="h-break">Minuten (30) oder Std:Min (0:45)</div>
       </section>
@@ -120,7 +127,8 @@ export function dayEditScreen(root, monthId, entryId) {
     $('r-w').textContent = Fmt.money(wage);
     $('r-s').textContent = al ? Fmt.money(al) : '--';
     $('r-t').textContent = Fmt.money(wage + al);
-    $('r-n').textContent = v.start != null && v.end != null && v.end < v.start && v.date != null ? `Nachtschicht: endet am ${Fmt.date(v.date + 1)}` : '';
+    $('r-n').textContent = v.start != null && v.end != null && v.end <= v.start && v.date != null ? `${v.end === v.start ? '24-Stunden-Schicht' : 'Nachtschicht'}: endet am ${Fmt.date(v.date + 1)}` : '';
+    $('e-time').textContent = v.start == null || v.end == null ? 'Bitte Beginn und Ende eintragen.' : '';
     $('e-date').textContent = v.outside ? `Liegt nicht im Zeitraum ${Fmt.period(month)}` : '';
     $('h-break').classList.toggle('bad', v.brk == null);
     $('h-allow').classList.toggle('bad', v.allowance == null);
@@ -197,7 +205,7 @@ export function monthEditScreen(root, id, year) {
       const free = [...Array(12)].map((_, i) => i + 1).find((x) => x > mo && !taken(x)) || [...Array(12)].map((_, i) => i + 1).find((x) => !taken(x));
       if (free) mo = free;
     }
-    m = { id: 0, year: y, month: mo, hourlyRate: latest?.hourlyRate ?? profile?.hourlyRate ?? 0, profileId: profile?.id ?? null, periodStart: null, periodEnd: null };
+    m = { id: 0, year: y, month: mo, hourlyRate: defaultRate(), profileId: profile?.id ?? null, periodStart: null, periodEnd: null };
   }
   const custom = Months.hasCustomPeriod(m);
   const defStart = custom ? m.periodStart : epochDay(m.year, m.month, 1) - 0;
@@ -274,7 +282,7 @@ export function monthEditScreen(root, id, year) {
       if (await confirmDialog('Monat löschen?', `${Fmt.monthTitle(existing)} und alle ${n} Tage darin werden gelöscht. Das kann nicht rückgängig gemacht werden.`, 'Löschen', true)) {
         await deleteMonth(existing.id);
         toast('Monat gelöscht');
-        location.replace(`#/year/${existing.year}`);
+        back(`year/${existing.year}`, 2); // zurück über Monat-bearbeiten und den gelöschten Monat
       }
     },
   };

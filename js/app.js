@@ -38,20 +38,32 @@ function homeScreen() {
     </main>
     ${fab('newmonth:' + new Date().getFullYear(), 'Monat hinzufügen')}
     ${state.months.length ? summaryBar(total, s.decimalHours) : ''}`;
-  return {
-    async homemenu() {
-      const v = await actionSheet('', [
-        { label: 'Dienstplan einfügen', value: 'roster' },
-        { label: 'In Dateien / iCloud sichern', value: 'filebackup' },
-        { label: s.newestFirst ? 'Älteste zuerst anzeigen' : 'Neueste zuerst anzeigen', value: 'sort' },
-        { label: 'Einstellungen & Backup', value: 'settings' },
-      ]);
-      if (v === 'roster') go('roster');
-      if (v === 'settings') go('settings');
-      if (v === 'filebackup') fileBackupAction();
-      if (v === 'sort') { await saveSettings({ newestFirst: !s.newestFirst }); render(); }
-    },
-  };
+  return { homemenu: () => appMenu() };
+}
+
+/** Menü ⋯ (Startseite und Jahresansicht) */
+async function appMenu(extra = []) {
+  const s = state.settings;
+  const v = await actionSheet('', [
+    ...extra,
+    { label: 'Dienstplan einfügen', value: 'roster' },
+    { label: 'In Dateien / iCloud sichern', value: 'filebackup' },
+    { label: s.newestFirst ? 'Älteste zuerst anzeigen' : 'Neueste zuerst anzeigen', value: 'sort' },
+    { label: 'Einstellungen & Backup', value: 'settings' },
+  ]);
+  if (v === 'roster') go('roster');
+  if (v === 'settings') go('settings');
+  if (v === 'filebackup') fileBackupAction();
+  if (v === 'sort') { await saveSettings({ newestFirst: !s.newestFirst }); render(); }
+  return v;
+}
+
+/** Jahr, das beim Öffnen gezeigt wird: aktuelles Jahr, sonst das neueste mit Einträgen. */
+function startYear() {
+  const years = Q.years(true);
+  if (!years.length) return null;
+  const now = new Date().getFullYear();
+  return years.includes(now) ? now : years[0];
 }
 
 function yearScreen(year) {
@@ -64,9 +76,12 @@ function yearScreen(year) {
     ${topbar({
       title: String(year), back: true,
       actions: `<button class="iconbtn" data-act="search" aria-label="Suche">${icon('search')}</button>
-        ${months.length ? `<button class="iconbtn" data-act="exportyear" aria-label="Jahr teilen">${icon('share')}</button>` : ''}`,
+        ${months.length ? `<button class="iconbtn" data-act="exportyear" aria-label="Jahr teilen">${icon('share')}</button>` : ''}
+        <button class="iconbtn" data-act="yearmenu" aria-label="Mehr">${icon('more')}</button>`,
     })}
     <main class="content">
+      ${backupBanner()}
+      ${next ? nextShiftCard(next, Shifts.label(next, now), Q.month(next.monthId), s.decimalHours) : ''}
       ${!months.length ? emptyState(`Keine Monate in ${year}`, 'Tippe auf +, um einen Monat anzulegen.') : ''}
       ${months.map((m) => statsCard({
         title: Fmt.monthName(m.month),
@@ -83,6 +98,9 @@ function yearScreen(year) {
   return {
     back: () => back(''),
     exportyear: () => go(`export/year/${year}`),
+    async yearmenu() {
+      if ((await appMenu([{ label: 'Alle Jahre anzeigen', value: 'years' }])) === 'years') back('');
+    },
   };
 }
 
@@ -315,6 +333,11 @@ async function boot() {
   await initBackup();
   onChange(() => applyTheme());
   setRenderer(render);
+  // Beim Öffnen direkt die Monate des aktuellen Jahres zeigen; Zurück führt zur Jahresübersicht
+  if (!location.hash || location.hash === '#/' || location.hash === '#') {
+    const y = startYear();
+    if (y) history.replaceState(null, '', '#/year/' + y);
+  }
   render();
   installHint();
 }

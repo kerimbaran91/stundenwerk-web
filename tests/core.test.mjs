@@ -1,6 +1,6 @@
 // Übertragen aus CoreTest.kt der Android-App. Start: node tests/core.test.mjs
 import { TimeMath, Fmt, Calc, Months, ExportBuilder, defaultExportConfig, RosterParser, Shifts, epochDay, ymd, MINUTES_PER_DAY } from '../js/core.js';
-import { backupFrom, backupTo } from '../js/backup.js';
+import { backupFrom, backupTo, verifyBackup } from '../js/backup.js';
 
 let failures = 0;
 function check(name, actual, expected) {
@@ -231,6 +231,21 @@ check('backup rundreise', again.entries[0], b.entries[0]);
 let err = '';
 try { backupFrom('{"app":"x"}'); } catch (e) { err = e.message; }
 check('backup falsche datei', err, 'Die Datei ist kein Stundenwerk-Backup.');
+
+// --- Kompaktes Backup: gleicher Inhalt, kleiner, Prüfung erkennt Abweichungen
+const big = { profiles: b.profiles, months: [month], entries, exportConfig: null, settings: { rosterNames: 'Kerim' } };
+const pretty = backupTo(big);
+const compact = backupTo(big, { compact: true });
+check('kompakt kleiner', compact.length < pretty.length * 0.75, true);
+check('kompakt gleicher inhalt', JSON.stringify(backupFrom(compact).entries), JSON.stringify(backupFrom(pretty).entries));
+check('kompakt pruefung ok', verifyBackup(compact, big), { months: 1, entries: 16 });
+let verr = '';
+try { verifyBackup(compact.replace('"allowance":15', '"allowance":16'), big); } catch (e) { verr = e.message; }
+check('pruefung erkennt abweichung', verr.startsWith('Backup-Prüfung fehlgeschlagen'), true);
+verr = '';
+try { verifyBackup(compact.slice(0, -40), big); } catch (e) { verr = e.message; }
+check('pruefung erkennt abgeschnittene datei', verr !== '', true);
+check('umlaute bleiben', backupFrom(backupTo({ ...big, entries: [{ ...entries[0], activity: 'Flüchtlingsunterkunft „Süd“ – 15 €' }] }, { compact: true })).entries[0].activity, 'Flüchtlingsunterkunft „Süd“ – 15 €');
 
 if (failures) { console.log(`${failures} Prüfung(en) fehlgeschlagen`); process.exit(1); }
 console.log('Alle Prüfungen bestanden');

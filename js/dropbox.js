@@ -2,12 +2,14 @@
 // Die App bekommt nur Zugriff auf ihren eigenen Ordner „Apps/<App-Name>“ in Dropbox.
 import { DROPBOX_APP_KEY } from './config.js';
 import { kvGet, kvSet } from './store.js';
+import { backupFrom, verifyBackup } from './backup.js';
 
 const MAIN_FILE = '/Stundenwerk-Backup.json';
 const HISTORY_DIR = '/Verlauf';
 
 let auth = null; // { refreshToken, accessToken, expiresAt, account }
-let status = { lastUploadAt: 0, lastError: '', pending: false };
+// pending: Änderung noch nicht gesichert · blocked: 'newDevice' | 'shrink' (automatische Sicherung pausiert)
+let status = { lastUploadAt: 0, lastError: '', pending: false, pendingSince: 0, blocked: null, blockInfo: null, historyPending: false, lastUploadedEntries: null, lastCleanupAt: 0 };
 const listeners = new Set();
 
 export function onStatus(fn) { listeners.add(fn); }
@@ -69,19 +71,20 @@ export async function finishAuth(code) {
     auth.account = (await acc.json()).email || '';
   } catch {}
   status.lastError = '';
+  status.blocked = 'newDevice'; // erst nach der Entscheidung „wiederherstellen oder behalten“ hochladen
   await persist();
 }
 
 export async function disconnect() {
   try { await api('https://api.dropboxapi.com/2/auth/token/revoke', {}); } catch {}
   auth = null;
-  status = { lastUploadAt: 0, lastError: '', pending: false };
+  status = { lastUploadAt: 0, lastError: '', pending: false, pendingSince: 0, blocked: null, blockInfo: null, historyPending: false, lastUploadedEntries: null, lastCleanupAt: 0 };
   await persist();
 }
 
-async function token() {
+async function token(minValidMs = 0) {
   if (!auth) throw new Error('Nicht mit Dropbox verbunden.');
-  if (auth.accessToken && Date.now() < auth.expiresAt) return auth.accessToken;
+  if (auth.accessToken && Date.now() + minValidMs < auth.expiresAt) return auth.accessToken;
   const res = await fetch('https://api.dropboxapi.com/oauth2/token', {
     method: 'POST',
     body: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: auth.refreshToken, client_id: DROPBOX_APP_KEY }),
@@ -123,12 +126,28 @@ function today() {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
+const bytes = (s) => new TextEncoder().encode(s);
+
+/** Lädt hoch und prüft, dass Dropbox genau so viele Bytes gespeichert hat, wie gesendet wurden. */
+async function uploadChecked(path, body) {
+  const res = await api('https://content.dropboxapi.com/2/files/upload', { arg: { path, mode: 'overwrite', mute: true }, body: new Blob([body]) });
+  const meta = await res.json().catch(() => ({}));
+  if (meta.size !== body.byteLength) throw new Error('Dropbox hat die Datei unvollständig gespeichert – wird wiederholt.');
+}
+
 /** Lädt das Backup hoch: Hauptdatei + eine Tageskopie im Ordner „Verlauf“. */
 export async function upload(json) {
-  const body = new Blob([json], { type: 'application/octet-stream' });
-  const up = (path) => api('https://content.dropboxapi.com/2/files/upload', { arg: { path, mode: 'overwrite', mute: true }, body });
-  await up(MAIN_FILE);
-  await up(`${HISTORY_DIR}/Stundenwerk-${today()}.json`);
+  const body = bytes(json);
+  await uploadChecked(MAIN_FILE, body);
+  await uploadChecked(`${HISTORY_DIR}/Stundenwerk-${today()}.json`, body);
+}
+
+/** Infos über das Backup in Dropbox (für „neues iPhone“). null = es gibt noch keins. */
+export async function remoteInfo() {
+  let text;
+  try { text = await download(); } catch (e) { if (/noch kein Backup/.test(e.message)) return null; throw e; }
+  const b = backupFrom(text);
+  return { text, backup: b, months: b.months.length, entries: b.entries.length, createdAt: b.createdAt };
 }
 
 export async function download(path = MAIN_FILE) {
@@ -208,40 +227,110 @@ async function cleanup() {
 
 let timer = null;
 let running = false;
-let getJson = null;
+let src = null; // { data(): App-Daten, json(compact): Backup-Text }
 
-/** getBackupJson: Funktion, die das aktuelle Backup als Text liefert. */
-export function setSource(fn) { getJson = fn; }
+export function setSource(source) { src = source; }
 
-export function schedule(delay = 2500) {
+/** Viel weniger Einträge als beim letzten Backup? Dann nicht still überschreiben. */
+function shrinkProblem(count) {
+  const last = status.lastUploadedEntries;
+  if (last == null) return null;
+  if ((last > 0 && count === 0) || (last - count >= 10 && count < last * 0.7)) return { last, now: count };
+  return null;
+}
+
+export function schedule(delay = 1000) {
   if (!connected()) return;
+  if (!status.pending) status.pendingSince = Date.now();
   status.pending = true;
   kvSet('dropboxStatus', status);
   emit();
   clearTimeout(timer);
-  timer = setTimeout(syncNow, delay);
+  timer = setTimeout(() => syncNow(), delay);
 }
 
-export async function syncNow() {
+/** force: auch sichern, wenn die Sicherung wegen weniger Einträge pausiert ist. */
+export async function syncNow({ force = false } = {}) {
   clearTimeout(timer);
-  if (!connected() || !getJson || running) return;
+  if (!connected() || !src || running) return;
+  if (status.blocked === 'newDevice' && !force) return;
+  const data = src.data();
+  const prob = shrinkProblem(data.entries.length);
+  if (prob && !force) {
+    status = { ...status, blocked: 'shrink', blockInfo: prob, pending: true };
+    await persist();
+    return;
+  }
   if (!navigator.onLine) { status.lastError = 'Offline – wird nachgeholt.'; emit(); return; }
   running = true;
   try {
-    await upload(getJson());
-    status = { ...status, lastUploadAt: Date.now(), lastError: '', pending: false };
+    const json = src.json(true);
+    verifyBackup(json, data); // jeder Wert gleich? Sonst wird nichts überschrieben
+    await upload(json);
+    status = {
+      ...status, lastUploadAt: Date.now(), lastError: '', pending: false, pendingSince: 0, blocked: null, blockInfo: null,
+      historyPending: false, lastUploadedEntries: data.entries.length,
+    };
     try { await cleanup(); } catch {} // Aufräumen darf die Sicherung nie stören
   } catch (e) {
     status.lastError = e.message || 'Sicherung fehlgeschlagen.';
     status.pending = true;
+    if (!status.pendingSince) status.pendingSince = Date.now();
   } finally {
     running = false;
     await persist();
   }
 }
 
-// Ausstehende Sicherung nachholen, sobald wieder Netz da ist bzw. die App wieder geöffnet wird
-addEventListener('online', () => status.pending && syncNow());
+/** Nach bewusstem Wiederherstellen/Behalten: neuer Vergleichswert für den Schutz vor Überschreiben. */
+export async function setBaseline(entries) {
+  status = { ...status, lastUploadedEntries: entries, blocked: null, blockInfo: null };
+  await persist();
+}
+
+/**
+ * Beim Schließen/Wegwischen: Hauptdatei sofort senden. keepalive = der Browser schickt die Anfrage auch dann
+ * noch zu Ende, wenn die App schon weg ist. Ohne Vorab-Anfrage (Dropbox-„CORS-Hack“), sonst klappt keepalive nicht.
+ */
+function quickUpload() {
+  if (!connected() || !status.pending || status.blocked || running || !src) return;
+  if (!auth.accessToken || Date.now() > auth.expiresAt - 60000) return; // Anmeldung müsste erst erneuert werden
+  const data = src.data();
+  if (shrinkProblem(data.entries.length)) return;
+  let json;
+  try {
+    json = src.json(true);
+    verifyBackup(json, data);
+  } catch { return; }
+  clearTimeout(timer);
+  const body = bytes(json);
+  const arg = JSON.stringify({ path: MAIN_FILE, mode: 'overwrite', mute: true });
+  const url = 'https://content.dropboxapi.com/2/files/upload?authorization=' + encodeURIComponent('Bearer ' + auth.accessToken) + '&arg=' + encodeURIComponent(arg);
+  fetch(url, { method: 'POST', body, keepalive: body.byteLength < 60000, headers: { 'Content-Type': 'text/plain; charset=dropbox-cors-hack' } })
+    .then((r) => (r.ok ? r.json() : Promise.reject(new Error())))
+    .then((meta) => {
+      if (meta.size !== body.byteLength) return;
+      // Tageskopie wird beim nächsten Öffnen nachgeholt
+      status = { ...status, lastUploadAt: Date.now(), lastError: '', pending: false, pendingSince: 0, historyPending: true, lastUploadedEntries: data.entries.length };
+      persist();
+    })
+    .catch(() => {}); // bleibt "pending" -> wird beim nächsten Öffnen nachgeholt
+}
+
+/** Anmeldung frühzeitig erneuern, damit sie beim Schließen sicher noch gültig ist. */
+export async function ensureFresh() {
+  if (!connected() || !navigator.onLine) return;
+  try { await token(30 * 60000); } catch {}
+}
+
+function catchUp() {
+  if (connected() && (status.pending || status.historyPending)) syncNow();
+}
+
+addEventListener('online', catchUp);
+addEventListener('pagehide', quickUpload);
 document.addEventListener('visibilitychange', () => {
-  if (status.pending && connected()) syncNow();
+  if (document.hidden) quickUpload();
+  else ensureFresh().then(catchUp);
 });
+setInterval(() => { if (!document.hidden) ensureFresh(); }, 10 * 60000);

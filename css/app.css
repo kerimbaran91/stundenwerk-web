@@ -328,3 +328,8 @@ input.search { margin-bottom: 0; flex: none; }
 .install-box ol { text-align: left; padding-left: 22px; line-height: 1.5; }
 .install-box li { margin-bottom: 8px; }
 .warn-text { background: var(--warn-c); padding: 10px; border-radius: 12px; text-align: left; }
+
+.dbx-line { font-size: 13px; color: var(--muted); padding: 0 4px; display: flex; align-items: center; gap: 4px; }
+.dbx-line .ic { fill: currentColor; }
+.dbx-line.ok { color: var(--primary); }
+#dbx-home:empty { display: none; }

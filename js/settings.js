@@ -13,11 +13,15 @@ export const backupJson = () => backupTo(state);
 
 export async function initBackup() {
   await Dropbox.init();
-  Dropbox.setSource(backupJson);
+  Dropbox.setSource({ data: () => state, json: (compact) => backupTo(state, { compact }) });
   onChange((dataChanged) => dataChanged && Dropbox.schedule());
-  Dropbox.onStatus(() => refreshDropboxStatus());
-  // Beim Start eine ausstehende Sicherung nachholen
-  if (Dropbox.connected() && Dropbox.getStatus().pending) Dropbox.syncNow();
+  Dropbox.onStatus(() => { refreshDropboxStatus(); refreshHomeStatus(); });
+  setInterval(refreshHomeStatus, 10000);
+  // Beim Start: Anmeldung erneuern und eine ausstehende Sicherung nachholen
+  Dropbox.ensureFresh().then(() => {
+    const st = Dropbox.getStatus();
+    if (Dropbox.connected() && (st.pending || st.historyPending)) Dropbox.syncNow();
+  });
 }
 
 function ago(ts) {
@@ -59,12 +63,39 @@ export async function fileBackupAction() {
 }
 
 /** Hinweis auf der Startseite, wenn die letzte Datei-Sicherung zu alt ist. */
+/** Dropbox-Status oben auf der Startseite */
+function dropboxHome() {
+  if (!Dropbox.configured()) return '';
+  const st = Dropbox.getStatus();
+  if (!Dropbox.connected()) {
+    return st.lastError ? `<div class="banner bad" data-go="settings">${icon('cloud', 'tiny')} ${esc(st.lastError)}</div>` : '';
+  }
+  if (st.blocked === 'newDevice') {
+    return `<div class="banner bad" data-go="settings"><b>Dropbox verbunden – bitte entscheiden</b><span class="small">Backup wiederherstellen oder iPhone-Daten behalten? Bis dahin wird nicht gesichert. Hier tippen.</span></div>`;
+  }
+  if (st.blocked === 'shrink') {
+    const i = st.blockInfo || {};
+    return `<div class="banner bad"><div><b>Automatische Sicherung pausiert</b><br><span class="small">Auf dem iPhone sind ${i.now} Tage, im letzten Backup waren es ${i.last}. Damit das gute Backup nicht aus Versehen überschrieben wird, wurde nicht gesichert.</span></div>
+      <div class="row gap"><button class="btn text" data-go="settings">Wiederherstellen …</button><button class="btn primary" data-banner="dbxforce">Trotzdem sichern</button></div></div>`;
+  }
+  const late = st.pending && (st.lastError || Date.now() - (st.pendingSince || Date.now()) > 20000);
+  if (late) {
+    return `<div class="banner bad"><div><b>Backup ausstehend</b><br><span class="small">${esc(st.lastError || 'Noch nicht in Dropbox gesichert.')} App bitte kurz offen lassen.</span></div>
+      <div class="row gap"><button class="btn primary" data-banner="dbxnow">Jetzt sichern</button></div></div>`;
+  }
+  if (st.pending) return `<div class="dbx-line">${icon('cloud', 'tiny')} Wird gesichert …</div>`;
+  if (st.lastUploadAt) return `<div class="dbx-line ok">${icon('check', 'tiny')} In Dropbox gesichert ${esc(ago(st.lastUploadAt))}</div>`;
+  return '';
+}
+
+function refreshHomeStatus() {
+  const el = document.getElementById('dbx-home');
+  if (el) el.innerHTML = dropboxHome();
+}
+
 export function backupBanner() {
   const s = state.settings;
-  const parts = [];
-  if (Dropbox.configured() && !Dropbox.connected() && Dropbox.getStatus().lastError) {
-    parts.push(`<div class="banner bad" data-go="settings">${icon('cloud', 'tiny')} ${esc(Dropbox.getStatus().lastError)}</div>`);
-  }
+  const parts = [`<div id="dbx-home">${dropboxHome()}</div>`];
   const days = s.backupReminderDays;
   const due = days > 0 && state.entries.length && s.lastChangeAt > s.lastFileBackupAt &&
     Date.now() - (s.lastFileBackupAt || s.firstChangeAt || Date.now()) > days * 86400000 && Date.now() > (s.snoozeUntil || 0);
@@ -82,7 +113,15 @@ document.addEventListener('click', async (ev) => {
   if (b) {
     ev.stopPropagation();
     if (b.dataset.banner === 'now') fileBackupAction();
-    else {
+    else if (b.dataset.banner === 'dbxnow') {
+      await Dropbox.syncNow();
+      toast(Dropbox.getStatus().pending ? 'Sicherung fehlgeschlagen – bitte Netz prüfen' : 'In Dropbox gesichert');
+    } else if (b.dataset.banner === 'dbxforce') {
+      if (await confirmDialog('Trotzdem sichern?', 'Das Backup in Dropbox wird mit dem jetzigen Stand überschrieben. Ältere Tageskopien im Verlauf bleiben erhalten.', 'Sichern', true)) {
+        await Dropbox.syncNow({ force: true });
+        toast(Dropbox.getStatus().pending ? 'Sicherung fehlgeschlagen' : 'In Dropbox gesichert');
+      }
+    } else {
       await saveSettings({ snoozeUntil: Date.now() + 2 * 86400000 });
       document.getElementById('backup-banner')?.remove();
     }
@@ -149,7 +188,9 @@ function dropboxSection() {
       <div class="row gap"><input id="dbx-code" class="grow" placeholder="Code einfügen" autocomplete="off"><button class="btn primary" data-act="dbxconnect">Verbinden</button></div>`;
   }
   const st = Dropbox.getStatus();
-  const state_ = st.lastError ? `<span class="bad">${esc(st.lastError)}</span>` : st.pending ? 'Wird gesichert …' : 'Gesichert ' + ago(st.lastUploadAt);
+  const state_ = st.blocked === 'newDevice' ? '<span class="bad">Bitte entscheiden: „Jetzt sichern“ tippen</span>'
+    : st.blocked === 'shrink' ? `<span class="bad">Pausiert: ${st.blockInfo?.now} statt ${st.blockInfo?.last} Tage</span>`
+    : st.lastError ? `<span class="bad">${esc(st.lastError)}</span>` : st.pending ? 'Wird gesichert …' : 'Gesichert ' + ago(st.lastUploadAt);
   return `<div class="row"><div class="grow"><b>Verbunden</b>${Dropbox.account() ? ` · ${esc(Dropbox.account())}` : ''}<div class="small muted">${state_}</div></div></div>
     <div class="btn-list">
       <button class="btn outline" data-act="dbxnow">Jetzt sichern</button>
@@ -301,7 +342,7 @@ export function settingsScreen(root) {
         await Dropbox.finishAuth(code);
         toast('Mit Dropbox verbunden');
         refreshDropboxStatus();
-        await Dropbox.syncNow();
+        await decideAfterConnect();
       } catch (e) {
         toast(e.message, 4000);
         authUrl = await Dropbox.startAuth({ fresh: true });
@@ -309,8 +350,13 @@ export function settingsScreen(root) {
       }
     },
     async dbxnow() {
-      await Dropbox.syncNow();
-      if (!Dropbox.getStatus().lastError) toast('In Dropbox gesichert');
+      const st = Dropbox.getStatus();
+      if (st.blocked === 'newDevice') return decideAfterConnect();
+      if (st.blocked === 'shrink') {
+        if (!(await confirmDialog('Trotzdem sichern?', `Auf dem iPhone sind ${st.blockInfo?.now} Tage, im letzten Backup ${st.blockInfo?.last}. Das Backup wird überschrieben (ältere Tageskopien bleiben).`, 'Sichern', true))) return;
+        await Dropbox.syncNow({ force: true });
+      } else await Dropbox.syncNow();
+      toast(Dropbox.getStatus().pending ? 'Sicherung fehlgeschlagen – bitte Netz prüfen' : 'In Dropbox gesichert');
     },
     async dbxrestore() {
       try {
@@ -349,6 +395,48 @@ export function settingsScreen(root) {
   };
 }
 
+/** Nach dem Verbinden: Liegt schon ein Backup in Dropbox, zuerst fragen – nie still überschreiben. */
+async function decideAfterConnect() {
+  let info;
+  try {
+    info = await Dropbox.remoteInfo();
+  } catch (e) {
+    toast('Dropbox-Backup konnte nicht geprüft werden – bitte später „Jetzt sichern“ tippen', 4500);
+    return;
+  }
+  const local = state.entries.length;
+  if (!info || (local > 0 && info.entries <= local)) {
+    await Dropbox.setBaseline(info ? info.entries : null);
+    await Dropbox.syncNow({ force: true });
+    return;
+  }
+  const when = info.createdAt ? new Date(info.createdAt).toLocaleString('de-DE', { dateStyle: 'medium', timeStyle: 'short' }) : 'unbekannt';
+  let choice = null;
+  while (choice == null) {
+    choice = await dialog({
+      title: 'Backup in Dropbox gefunden',
+      body: `<p>In Dropbox liegt ein Backup mit <b>${info.months} Monaten und ${info.entries} Tagen</b> (Stand ${esc(when)}).</p>
+        <p>Auf diesem iPhone ${local ? `sind ${local} Tage` : 'sind noch keine Daten'}.</p><p>Neues iPhone? Dann „Wiederherstellen“ wählen.</p>`,
+      buttons: [
+        { label: 'iPhone-Daten behalten', value: 'keep' },
+        { label: 'Wiederherstellen', value: 'restore', kind: 'primary' },
+      ],
+    });
+  }
+  if (choice === 'restore') {
+    await Dropbox.setBaseline(info.entries);
+    await replaceAll(info.backup);
+    toast('Backup wiederhergestellt');
+    setTimeout(() => location.replace('#/'), 300);
+  } else {
+    if (!(await confirmDialog('iPhone-Daten behalten?', `Das Backup in Dropbox (${info.entries} Tage) wird mit den ${local} Tagen von diesem iPhone überschrieben. Ältere Tageskopien im Verlauf bleiben erhalten.`, 'Überschreiben', true))) {
+      return decideAfterConnect();
+    }
+    await Dropbox.setBaseline(null);
+    await Dropbox.syncNow({ force: true });
+  }
+}
+
 async function restore(text, source) {
   const b = backupFrom(text);
   const when = b.createdAt ? new Date(b.createdAt).toLocaleString('de-DE', { dateStyle: 'medium', timeStyle: 'short' }) : 'unbekannt';
@@ -359,6 +447,7 @@ async function restore(text, source) {
     true,
   );
   if (!ok) return;
+  await Dropbox.setBaseline(b.entries.length); // bewusst wiederhergestellt -> neuer Vergleichswert
   await replaceAll(b);
   toast('Backup wiederhergestellt');
   setTimeout(() => location.replace('#/'), 300);

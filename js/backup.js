@@ -10,30 +10,51 @@ const str = (v) => (typeof v === 'string' ? v : '');
 /** Zusätzliche Web-Einstellungen. Die Android-App ignoriert dieses Feld. */
 const SETTINGS_KEYS = ['rosterNames', 'decimalHours', 'newestFirst', 'theme', 'monthColumns'];
 
-export function backupTo(data) {
+/** Die zu sichernden Daten in fester Form (gleiche Felder und Typen wie beim Einlesen). */
+export function snapshot(data) {
+  return {
+    profiles: data.profiles.map((p) => ({
+      id: num(p.id), name: str(p.name), hourlyRate: num(p.hourlyRate), targetMinutes: num(p.targetMinutes),
+      defaultStart: num(p.defaultStart, 480), defaultEnd: num(p.defaultEnd, 960), defaultBreak: num(p.defaultBreak),
+      defaultActivity: str(p.defaultActivity), defaultAllowance: num(p.defaultAllowance), workDays: num(p.workDays, 31),
+    })),
+    months: data.months.map((m) => ({
+      id: num(m.id), year: num(m.year), month: num(m.month), hourlyRate: num(m.hourlyRate),
+      profileId: numOrNull(m.profileId), periodStart: numOrNull(m.periodStart), periodEnd: numOrNull(m.periodEnd),
+    })),
+    entries: data.entries.map((e) => ({
+      id: num(e.id), monthId: num(e.monthId), date: e.date, activity: str(e.activity), startMinutes: e.startMinutes,
+      endMinutes: e.endMinutes, breakMinutes: num(e.breakMinutes), note: str(e.note), workplace: str(e.workplace),
+      auk: str(e.auk), allowance: num(e.allowance), hourlyRate: numOrNull(e.hourlyRate),
+    })),
+  };
+}
+
+/** compact = ohne Leerzeichen/Zeilenumbrüche (für Dropbox). Inhalt ist identisch. */
+export function backupTo(data, { compact = false } = {}) {
   const settings = {};
   for (const k of SETTINGS_KEYS) if (data.settings && k in data.settings) settings[k] = data.settings[k];
+  const snap = snapshot(data);
   return JSON.stringify({
     app: 'Stundenwerk',
     version: BACKUP_VERSION,
     createdAt: Date.now(),
-    profiles: data.profiles.map((p) => ({
-      id: p.id, name: p.name, hourlyRate: p.hourlyRate, targetMinutes: p.targetMinutes, defaultStart: p.defaultStart,
-      defaultEnd: p.defaultEnd, defaultBreak: p.defaultBreak, defaultActivity: p.defaultActivity,
-      defaultAllowance: p.defaultAllowance, workDays: p.workDays,
-    })),
-    months: data.months.map((m) => ({
-      id: m.id, year: m.year, month: m.month, hourlyRate: m.hourlyRate, profileId: m.profileId ?? null,
-      periodStart: m.periodStart ?? null, periodEnd: m.periodEnd ?? null,
-    })),
-    entries: data.entries.map((e) => ({
-      id: e.id, monthId: e.monthId, date: e.date, activity: e.activity, startMinutes: e.startMinutes,
-      endMinutes: e.endMinutes, breakMinutes: e.breakMinutes, note: e.note, workplace: e.workplace, auk: e.auk,
-      allowance: e.allowance, hourlyRate: e.hourlyRate ?? null,
-    })),
+    ...snap,
     exportConfig: data.exportConfig,
     webSettings: settings,
-  }, null, 2);
+  }, null, compact ? 0 : 2);
+}
+
+/**
+ * Prüft, dass ein Backup-Text beim Wiedereinlesen genau die Daten ergibt (jeder Wert gleich).
+ * Wirft einen Fehler, wenn nicht – dann wird nicht hochgeladen.
+ */
+export function verifyBackup(text, data) {
+  const back = backupFrom(text);
+  const want = snapshot(data);
+  const same = JSON.stringify([back.profiles, back.months, back.entries]) === JSON.stringify([want.profiles, want.months, want.entries]);
+  if (!same) throw new Error('Backup-Prüfung fehlgeschlagen – es wurde nichts überschrieben.');
+  return { months: back.months.length, entries: back.entries.length };
 }
 
 export function backupFrom(text) {

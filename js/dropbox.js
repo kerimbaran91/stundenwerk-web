@@ -6,6 +6,9 @@ import { backupFrom, verifyBackup } from './backup.js';
 
 const MAIN_FILE = '/Stundenwerk-Backup.json';
 const HISTORY_DIR = '/Verlauf';
+// Komprimierte Kopie, die beim Schließen der App gesendet wird, wenn die normale Datei dafür zu groß ist
+const QUICK_FILE = '/Stundenwerk-Nachtrag.json.gz';
+const KEEPALIVE_MAX = 60000; // Browser senden nach dem Schließen nur kleine Anfragen (rund 64 KB) zu Ende
 
 let auth = null; // { refreshToken, accessToken, expiresAt, account }
 // pending: Änderung noch nicht gesichert · blocked: 'newDevice' | 'shrink' (automatische Sicherung pausiert)
@@ -142,10 +145,44 @@ export async function upload(json) {
   await uploadChecked(`${HISTORY_DIR}/Stundenwerk-${today()}.json`, body);
 }
 
+// ---- Komprimieren (gzip) – macht das Backup rund zehnmal kleiner
+const canGzip = () => typeof CompressionStream === 'function' && typeof DecompressionStream === 'function';
+async function pipe(data, stream) {
+  return new Uint8Array(await new Response(new Blob([data]).stream().pipeThrough(stream)).arrayBuffer());
+}
+const gzip = (data) => pipe(data, new CompressionStream('gzip'));
+const gunzip = (data) => pipe(data, new DecompressionStream('gzip'));
+
+/** Komprimierte Kopie aus Dropbox lesen (null, wenn es keine gibt oder sie nicht lesbar ist). */
+async function downloadQuick() {
+  if (!canGzip()) return null;
+  try {
+    const res = await api('https://content.dropboxapi.com/2/files/download', { arg: { path: QUICK_FILE } });
+    const text = new TextDecoder().decode(await gunzip(new Uint8Array(await res.arrayBuffer())));
+    backupFrom(text); // nur gültige Backups zählen
+    return text;
+  } catch {
+    return null;
+  }
+}
+
+/** Neuester Stand in Dropbox: die normale Datei oder – falls neuer – die komprimierte Kopie vom letzten Schließen. */
+export async function downloadLatest() {
+  let main = null;
+  try { main = await download(); } catch (e) { if (!/noch kein Backup/.test(e.message)) throw e; }
+  const quickText = await downloadQuick();
+  if (!main && !quickText) throw new Error('In Dropbox liegt noch kein Backup.');
+  if (!main) return quickText;
+  if (!quickText) return main;
+  let mainAt = 0;
+  try { mainAt = backupFrom(main).createdAt; } catch { return quickText; }
+  return backupFrom(quickText).createdAt > mainAt ? quickText : main;
+}
+
 /** Infos über das Backup in Dropbox (für „neues iPhone“). null = es gibt noch keins. */
 export async function remoteInfo() {
   let text;
-  try { text = await download(); } catch (e) { if (/noch kein Backup/.test(e.message)) return null; throw e; }
+  try { text = await downloadLatest(); } catch (e) { if (/noch kein Backup/.test(e.message)) return null; throw e; }
   const b = backupFrom(text);
   return { text, backup: b, months: b.months.length, entries: b.entries.length, createdAt: b.createdAt };
 }
@@ -227,7 +264,24 @@ async function cleanup() {
 
 let timer = null;
 let running = false;
-let src = null; // { data(): App-Daten, json(compact): Backup-Text }
+let src = null; // { data(): App-Daten, json(compact): Backup-Text, version(): Zeitstempel der letzten Änderung }
+let quick = null; // vorbereitete komprimierte Kopie: { version, gz, entries }
+
+/** Komprimierte Kopie vorbereiten (direkt nach jeder Änderung), damit sie beim Schließen sofort bereitliegt. */
+async function prepareQuick() {
+  if (!canGzip() || !src?.version) return;
+  try {
+    const version = src.version();
+    const data = src.data();
+    const json = src.json(true);
+    if (bytes(json).byteLength < KEEPALIVE_MAX) { quick = null; return; } // normale Datei ist klein genug
+    verifyBackup(json, data);
+    const gz = await gzip(bytes(json));
+    // Gegenprobe: entpackt muss wieder genau derselbe Text herauskommen
+    if (new TextDecoder().decode(await gunzip(gz)) !== json) return;
+    if (src.version() === version) quick = { version, gz, entries: data.entries.length };
+  } catch {}
+}
 
 export function setSource(source) { src = source; }
 
@@ -247,6 +301,7 @@ export function schedule(delay = 1000) {
   emit();
   clearTimeout(timer);
   timer = setTimeout(() => syncNow(), delay);
+  prepareQuick();
 }
 
 /** force: auch sichern, wenn die Sicherung wegen weniger Einträge pausiert ist. */
@@ -271,6 +326,15 @@ export async function syncNow({ force = false } = {}) {
       ...status, lastUploadAt: Date.now(), lastError: '', pending: false, pendingSince: 0, blocked: null, blockInfo: null,
       historyPending: false, lastUploadedEntries: data.entries.length,
     };
+    if (status.hasQuick) {
+      // Die normale Datei ist jetzt aktuell – die komprimierte Kopie vom Schließen wird nicht mehr gebraucht
+      try {
+        await apiJson('https://api.dropboxapi.com/2/files/delete_v2', { path: QUICK_FILE });
+        status.hasQuick = false;
+      } catch (e) {
+        if (e.status === 409) status.hasQuick = false; // gibt es nicht (mehr)
+      }
+    }
     try { await cleanup(); } catch {} // Aufräumen darf die Sicherung nie stören
   } catch (e) {
     status.lastError = e.message || 'Sicherung fehlgeschlagen.';
@@ -303,15 +367,30 @@ function quickUpload() {
     verifyBackup(json, data);
   } catch { return; }
   clearTimeout(timer);
-  const body = bytes(json);
-  const arg = JSON.stringify({ path: MAIN_FILE, mode: 'overwrite', mute: true });
+  let body = bytes(json);
+  let path = MAIN_FILE;
+  let full = true;
+  if (body.byteLength >= KEEPALIVE_MAX && quick && quick.version === src.version?.() && quick.gz.byteLength < KEEPALIVE_MAX) {
+    // Normale Datei zu groß für das Senden nach dem Schließen -> komprimierte Kopie schicken
+    body = quick.gz;
+    path = QUICK_FILE;
+    full = false;
+    status.hasQuick = true;
+    kvSet('dropboxStatus', status);
+  }
+  const arg = JSON.stringify({ path, mode: 'overwrite', mute: true });
   const url = 'https://content.dropboxapi.com/2/files/upload?authorization=' + encodeURIComponent('Bearer ' + auth.accessToken) + '&arg=' + encodeURIComponent(arg);
-  fetch(url, { method: 'POST', body, keepalive: body.byteLength < 60000, headers: { 'Content-Type': 'text/plain; charset=dropbox-cors-hack' } })
+  fetch(url, { method: 'POST', body, keepalive: body.byteLength < KEEPALIVE_MAX, headers: { 'Content-Type': 'text/plain; charset=dropbox-cors-hack' } })
     .then((r) => (r.ok ? r.json() : Promise.reject(new Error())))
     .then((meta) => {
       if (meta.size !== body.byteLength) return;
-      // Tageskopie wird beim nächsten Öffnen nachgeholt
-      status = { ...status, lastUploadAt: Date.now(), lastError: '', pending: false, pendingSince: 0, historyPending: true, lastUploadedEntries: data.entries.length };
+      if (full) {
+        // Tageskopie wird beim nächsten Öffnen nachgeholt
+        status = { ...status, lastUploadAt: Date.now(), lastError: '', pending: false, pendingSince: 0, historyPending: true, lastUploadedEntries: data.entries.length };
+      } else {
+        // Komprimierte Kopie liegt sicher in Dropbox; die normale Datei folgt beim nächsten Öffnen (bleibt „ausstehend“)
+        status = { ...status, quickAt: Date.now(), lastError: '' };
+      }
       persist();
     })
     .catch(() => {}); // bleibt "pending" -> wird beim nächsten Öffnen nachgeholt

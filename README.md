@@ -13,6 +13,7 @@ Läuft komplett im Browser, ohne Server. Die Daten liegen nur auf dem Gerät (pl
 ## Backup
 
 - **Dropbox:** Einstellungen → Dropbox-Backup → anmelden, Code kopieren, einfügen. Danach wird nach jeder Änderung automatisch gesichert (`Apps/<App-Name>/Stundenwerk-Backup.json` und eine Tageskopie unter `Verlauf/`).
+- Ist das Backup für das Senden beim Schließen zu groß, legt die App stattdessen eine komprimierte Kopie `Stundenwerk-Nachtrag.json.gz` ab. Beim nächsten Öffnen wird die normale Datei aktualisiert und die Kopie gelöscht; beim Wiederherstellen zählt der neuere Stand.
 - **Dateien/iCloud:** Einstellungen oder ⋯ → „In Dateien / iCloud sichern“ → im Teilen-Menü „In Dateien sichern“. Die App erinnert, wenn die letzte Sicherung zu alt ist.
 - Backups haben das gleiche Format wie bei der Android-App und sind in beide Richtungen austauschbar.
 

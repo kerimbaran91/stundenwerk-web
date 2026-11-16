@@ -13,7 +13,7 @@ export const backupJson = () => backupTo(state);
 
 export async function initBackup() {
   await Dropbox.init();
-  Dropbox.setSource({ data: () => state, json: (compact) => backupTo(state, { compact }) });
+  Dropbox.setSource({ data: () => state, json: (compact) => backupTo(state, { compact }), version: () => state.settings.lastChangeAt });
   onChange((dataChanged) => dataChanged && Dropbox.schedule());
   Dropbox.onStatus(() => { refreshDropboxStatus(); refreshHomeStatus(); });
   setInterval(refreshHomeStatus, 10000);
@@ -360,7 +360,7 @@ export function settingsScreen(root) {
     },
     async dbxrestore() {
       try {
-        const text = await Dropbox.download();
+        const text = await Dropbox.downloadLatest();
         await restore(text, 'Dropbox');
       } catch (e) {
         dialog({ title: 'Wiederherstellen fehlgeschlagen', body: `<p>${esc(e.message)}</p>` });

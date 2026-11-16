@@ -264,8 +264,16 @@ export function monthEditScreen(root, id, year) {
     } else if (state.months.some((x) => x.id !== m.id && x.year === y && x.month === mo && !Months.hasCustomPeriod(x))) {
       return err(`${Fmt.monthName(mo)} ${y} gibt es schon.`);
     }
+    const next = { ...m, year: y, month: mo, hourlyRate: rate, periodStart: ps, periodEnd: pe };
+    // Tage, die schon eingetragen sind, dürfen nicht außerhalb des neuen Zeitraums landen
+    if (existing) {
+      const outside = Q.entriesOf(existing.id).filter((e) => !Months.contains(next, e.date)).length;
+      if (outside) {
+        return err(`${outside === 1 ? '1 eingetragener Tag liegt' : outside + ' eingetragene Tage liegen'} außerhalb von ${Fmt.period(next)}. Bitte diese Tage zuerst löschen oder für den anderen Monat einen neuen Monat anlegen.`);
+      }
+    }
     $('e-main').textContent = '';
-    return { ...m, year: y, month: mo, hourlyRate: rate, periodStart: ps, periodEnd: pe };
+    return next;
   }
 
   return {

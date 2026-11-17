@@ -264,6 +264,7 @@ async function cleanup() {
 
 let timer = null;
 let running = false;
+let again = false; // während einer laufenden Sicherung wurde etwas geändert -> danach sofort nochmal sichern
 let src = null; // { data(): App-Daten, json(compact): Backup-Text, version(): Zeitstempel der letzten Änderung }
 let quick = null; // vorbereitete komprimierte Kopie: { version, gz, entries }
 
@@ -307,7 +308,8 @@ export function schedule(delay = 1000) {
 /** force: auch sichern, wenn die Sicherung wegen weniger Einträge pausiert ist. */
 export async function syncNow({ force = false } = {}) {
   clearTimeout(timer);
-  if (!connected() || !src || running) return;
+  if (running) { again = true; return; }
+  if (!connected() || !src) return;
   if (status.blocked === 'newDevice' && !force) return;
   const data = src.data();
   const prob = shrinkProblem(data.entries.length);
@@ -318,13 +320,18 @@ export async function syncNow({ force = false } = {}) {
   }
   if (!navigator.onLine) { status.lastError = 'Offline – wird nachgeholt.'; emit(); return; }
   running = true;
+  again = false;
+  const startVersion = src.version?.();
   try {
     const json = src.json(true);
     verifyBackup(json, data); // jeder Wert gleich? Sonst wird nichts überschrieben
     await upload(json);
+    // Wurde während des Hochladens etwas geändert, ist der hochgeladene Stand schon veraltet -> bleibt „ausstehend“
+    const changed = src.version?.() !== startVersion;
+    if (changed) again = true;
     status = {
-      ...status, lastUploadAt: Date.now(), lastError: '', pending: false, pendingSince: 0, blocked: null, blockInfo: null,
-      historyPending: false, lastUploadedEntries: data.entries.length,
+      ...status, lastUploadAt: Date.now(), lastError: '', pending: changed, pendingSince: changed ? status.pendingSince || Date.now() : 0,
+      blocked: null, blockInfo: null, historyPending: false, lastUploadedEntries: data.entries.length,
     };
     if (status.hasQuick) {
       // Die normale Datei ist jetzt aktuell – die komprimierte Kopie vom Schließen wird nicht mehr gebraucht
@@ -344,6 +351,11 @@ export async function syncNow({ force = false } = {}) {
     running = false;
     await persist();
   }
+  // Änderung während des Hochladens: gleich den neuesten Stand hinterherschicken
+  if (again && status.pending && connected()) {
+    again = false;
+    syncNow();
+  }
 }
 
 /** Nach bewusstem Wiederherstellen/Behalten: neuer Vergleichswert für den Schutz vor Überschreiben. */
@@ -361,6 +373,7 @@ function quickUpload() {
   if (!auth.accessToken || Date.now() > auth.expiresAt - 60000) return; // Anmeldung müsste erst erneuert werden
   const data = src.data();
   if (shrinkProblem(data.entries.length)) return;
+  const sentVersion = src.version?.();
   let json;
   try {
     json = src.json(true);
@@ -384,6 +397,7 @@ function quickUpload() {
     .then((r) => (r.ok ? r.json() : Promise.reject(new Error())))
     .then((meta) => {
       if (meta.size !== body.byteLength) return;
+      if (src.version?.() !== sentVersion) return; // inzwischen geändert -> bleibt „ausstehend“
       if (full) {
         // Tageskopie wird beim nächsten Öffnen nachgeholt
         status = { ...status, lastUploadAt: Date.now(), lastError: '', pending: false, pendingSince: 0, historyPending: true, lastUploadedEntries: data.entries.length };

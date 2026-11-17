@@ -559,6 +559,7 @@ export function defaultExportConfig() {
     personnelNoOn: false, personnelNo: '', periodOn: false, periodLabel: 'Abrechnungszeitraum',
     overtimeOn: false, overtimeLabel: 'Überstunden', signEmployeeOn: false, signEmployee: 'Unterschrift Mitarbeiter/in',
     signSiteOn: false, signSite: 'Unterschrift Einsatzstelle', highlightWeekends: true,
+    totalWageOn: true, totalAllowanceOn: true, // Summenzeile: Verdienst bzw. Sprit unten anzeigen
     columns: COLUMNS.map((c) => defaultColumn(c[0])),
   };
 }
@@ -632,8 +633,8 @@ function section(data, cfg) {
       switch (col.id) {
         case 'BREAK': return stats.breakMinutes === 0 ? '' : hours(stats.breakMinutes, false);
         case 'HOURS': return hours(stats.workedMinutes, false);
-        case 'WAGE': return money(stats.wageCents, false);
-        case 'ALLOWANCE': return stats.allowanceCents === 0 ? '' : money(stats.allowanceCents, false);
+        case 'WAGE': return cfg.totalWageOn === false ? '' : money(stats.wageCents, false);
+        case 'ALLOWANCE': return cfg.totalAllowanceOn === false || stats.allowanceCents === 0 ? '' : money(stats.allowanceCents, false);
         case 'TOTAL': return money(stats.totalCents, false);
       }
       return '';

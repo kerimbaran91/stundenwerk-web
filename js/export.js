@@ -56,6 +56,8 @@ export function exportScreen(root, kind, id) {
         ${sw('signEmployeeOn', 'Unterschriftsfeld Mitarbeiter/in')}
         ${sw('signSiteOn', 'Unterschriftsfeld Einsatzstelle')}
         ${sw('highlightWeekends', 'Wochenenden farbig markieren')}
+        ${sw('totalWageOn', 'Summe Verdienst anzeigen (unten)')}
+        ${sw('totalAllowanceOn', 'Summe Sprit anzeigen (unten)')}
       </section>
       <h3 class="section-title">Vorschau</h3>
       <div id="preview" class="preview"></div>

@@ -1,5 +1,5 @@
 // Offline-Betrieb: alle App-Dateien werden zwischengespeichert. Bei jeder neuen Version VERSION erhöhen.
-const VERSION = 'stundenwerk-v1.4.1';
+const VERSION = 'stundenwerk-v1.4.2';
 const FILES = [
   './', 'index.html', 'manifest.webmanifest', 'css/app.css',
   'js/app.js', 'js/core.js', 'js/store.js', 'js/backup.js', 'js/dropbox.js', 'js/config.js', 'js/ui.js', 'js/nav.js',

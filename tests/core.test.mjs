@@ -104,6 +104,14 @@ check('export zeitformat', sec2.rows[0].cells[4], '10:00');
 check('export gesamt-spalte', sec2.total.cells[6], '2.720,00 €');
 check('export info', sec2.infoLines, ['Mitarbeiter/in: Max Muster', 'Abrechnungszeitraum: 01.11.2026 – 30.11.2026']);
 check('export titel 2', sec2.titleLines, ['Stundenerfassung', 'November 2026']);
+const cfg3 = { ...cfg2, totalWageOn: false, totalAllowanceOn: false, columns: cfg2.columns.map((c) => (c.id === 'WAGE' ? { ...c, visible: true } : c)) };
+const sec3 = ExportBuilder.build('Test', [{ month, entries, profile: null }], cfg3).sections[0];
+const ci = (t) => sec3.columns.findIndex((c) => c.title === t);
+check('summe verdienst aus', sec3.total.cells[ci('Verdienst')], '');
+check('summe sprit aus', sec3.total.cells[ci('Sprit')], '');
+check('summe gesamt bleibt', sec3.total.cells[ci('Gesamt')], '2.720,00 €');
+check('tageswerte bleiben', [sec3.rows[0].cells[ci('Verdienst')], sec3.rows[0].cells[ci('Sprit')]], ['155,00 €', '+15,00 €']);
+check('summen-schalter im backup', backupFrom(backupTo({ profiles: [], months: [month], entries, exportConfig: cfg3, settings: {} })).exportConfig.totalWageOn, false);
 check('export unterschrift', sec2.signatures, ['Unterschrift Mitarbeiter/in']);
 
 // --- Dienstplan aus WhatsApp

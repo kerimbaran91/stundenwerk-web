@@ -359,17 +359,25 @@ function removeRange(s, m) {
   return s.slice(0, m.index) + s.slice(m.index + m[0].length);
 }
 
+const AMOUNT_BEFORE = /(?:\+|sprit(?:geld)?|fahrgeld|fahrtgeld|fahrtkosten|benzin|extra)\s*:?\s*\+?\s*$/i;
+const AMOUNT_AFTER = /^\s*(?:€|eur\b|euro\b)/i;
+/** Sieht die Zahl wie ein Betrag aus ("Fahrgeld 7.5", "+7.5", "7.5 €")? Dann ist sie kein Datum. */
+function looksLikeAmount(s, m) {
+  return AMOUNT_BEFORE.test(s.slice(0, m.index)) || AMOUNT_AFTER.test(s.slice(m.index + m[0].length));
+}
+
 /** Erstes gültiges Datum in der Zeile: { m (Treffer zum Entfernen), d (epochDay) } */
 function findDate(s, today) {
   for (const re of [DATE_RE, DATE_SLASH]) {
     for (const m of s.matchAll(re)) {
+      if (looksLikeAmount(s, m)) continue;
       const d = toDate(+m[1], +m[2], m[3] || '', today);
       if (d != null) return { m, d };
     }
   }
   for (const m of s.matchAll(DATE_NAME)) {
     const key = m[2].toLowerCase().slice(0, 3);
-    const month = MONTH_NUM[key] ?? MONTH_NUM[m[2].toLowerCase().slice(0, 3).replace('ä', 'ä')];
+    const month = MONTH_NUM[key];
     const d = month ? toDate(+m[1], month, m[3] || '', today) : null;
     if (d != null) return { m, d };
   }
@@ -567,7 +575,10 @@ export const ExportBuilder = {
     return {
       fileBaseName,
       widthPercent: cfg.widthPercent,
-      sections: [...months].sort((a, b) => Months.key(a.month) - Months.key(b.month)).map((d) => section(d, cfg)),
+      // Bei mehreren Monaten (Jahres-PDF) Monate ohne Tage weglassen – sonst gäbe es leere Seiten
+      sections: [...months]
+        .filter((d) => months.length === 1 || d.entries.length > 0)
+        .sort((a, b) => Months.key(a.month) - Months.key(b.month)).map((d) => section(d, cfg)),
     };
   },
 };

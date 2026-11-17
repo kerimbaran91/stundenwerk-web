@@ -290,7 +290,8 @@ export function monthEditScreen(root, id, year) {
       if (await confirmDialog('Monat löschen?', `${Fmt.monthTitle(existing)} und alle ${n} Tage darin werden gelöscht. Das kann nicht rückgängig gemacht werden.`, 'Löschen', true)) {
         await deleteMonth(existing.id);
         toast('Monat gelöscht');
-        back(`year/${existing.year}`, 2); // zurück über Monat-bearbeiten und den gelöschten Monat
+        // Einen Schritt zurück. War das die Seite des gelöschten Monats, geht sie selbst noch einen Schritt weiter zurück.
+        back(`year/${existing.year}`);
       }
     },
   };

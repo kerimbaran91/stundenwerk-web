@@ -204,6 +204,18 @@ check('betrag naechste zeile ohne namen', RosterParser.parse('20.11 16-02\n5€ 
 check('PLZ ist keine zeit', RosterParser.parse('94336 Hunderdorf\n20.11 16-02', [], today).shifts.length, 1);
 check('24h im plan', RosterParser.parse('20.11. 6-6 Kerim', ['Kerim'], today).shifts.map((x) => [x.startMinutes, x.endMinutes]), [[360, 360]]);
 check('24h schicht laeuft', Shifts.isRunning({ id: 9, date: D(2026, 11, 20), startMinutes: 360, endMinutes: 360 }, at(2026, 11, 21, 5, 0)), true);
+// Betrag mit Punkt ist kein Datum
+const am1 = RosterParser.parse('So 22.11.\n10-15 Uhr\nFahrgeld 7.5\nKerim', ['Kerim'], today);
+check('fahrgeld 7.5 im block', am1.shifts.map((x) => [ymd(x.date).d, x.allowance]), [[22, 7.5]]);
+check('fahrgeld 7.5 nichts unerkannt', am1.unrecognized, []);
+check('sprit: 12.5', RosterParser.parse('So 22.11.\n10-15 Uhr\nSprit: 12.5\nKerim', ['Kerim'], today).shifts[0]?.allowance, 12.5);
+check('7.5 €', RosterParser.parse('So 22.11.\n10-15 Uhr\n7.5 €\nKerim', ['Kerim'], today).shifts[0]?.allowance, 7.5);
+check('datum 7.5. bleibt datum', RosterParser.parse('Sa 7.5. 8-16 Kerim', ['Kerim'], today).shifts.map((x) => [ymd(x.date).m, ymd(x.date).d]), [[5, 7]]);
+check('+7.5 mit datum', RosterParser.parse('Mo 23.11. 16-2 +7.5 Kerim', ['Kerim'], today).shifts.map((x) => [ymd(x.date).d, x.allowance]), [[23, 7.5]]);
+// Jahres-PDF ohne leere Monate
+const yr = ExportBuilder.build('2026', [{ month, entries, profile: null }, { month: { ...month, id: 2, month: 10 }, entries: [], profile: null }], cfg);
+check('jahres-pdf ohne leeren monat', yr.sections.map((x) => x.title), ['November 2026']);
+check('einzelner leerer monat bleibt', ExportBuilder.build('x', [{ month, entries: [], profile: null }], cfg).sections.length, 1);
 check('namen trennen', RosterParser.splitNames('Kerim, Kerim B.; '), ['Kerim', 'Kerim B.']);
 
 // --- Nächste Schicht

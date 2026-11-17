@@ -28,8 +28,10 @@ export async function init() {
   status = Object.assign(status, (await kvGet('dropboxStatus')) || {});
 }
 async function persist() {
-  await kvSet('dropbox', auth);
-  await kvSet('dropboxStatus', status);
+  try {
+    await kvSet('dropbox', auth);
+    await kvSet('dropboxStatus', status);
+  } catch {} // Speicherausfall darf die Sicherung nicht stoppen
   emit();
 }
 
@@ -103,7 +105,7 @@ async function token(minValidMs = 0) {
   }
   auth.accessToken = j.access_token;
   auth.expiresAt = Date.now() + (j.expires_in - 60) * 1000;
-  await kvSet('dropbox', auth);
+  try { await kvSet('dropbox', auth); } catch {}
   return auth.accessToken;
 }
 
@@ -298,7 +300,7 @@ export function schedule(delay = 1000) {
   if (!connected()) return;
   if (!status.pending) status.pendingSince = Date.now();
   status.pending = true;
-  kvSet('dropboxStatus', status);
+  kvSet('dropboxStatus', status).catch(() => {});
   emit();
   clearTimeout(timer);
   timer = setTimeout(() => syncNow(), delay);
@@ -389,7 +391,7 @@ function quickUpload() {
     path = QUICK_FILE;
     full = false;
     status.hasQuick = true;
-    kvSet('dropboxStatus', status);
+    kvSet('dropboxStatus', status).catch(() => {});
   }
   const arg = JSON.stringify({ path, mode: 'overwrite', mute: true });
   const url = 'https://content.dropboxapi.com/2/files/upload?authorization=' + encodeURIComponent('Bearer ' + auth.accessToken) + '&arg=' + encodeURIComponent(arg);

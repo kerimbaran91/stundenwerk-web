@@ -4,36 +4,86 @@ import { Months, normalizeExportConfig, defaultExportConfig, ymd } from './core.
 const DB_NAME = 'stundenwerk';
 const STORE = 'kv';
 let dbPromise = null;
+const EMERGENCY_KEY = 'stundenwerk-notkopie';
 
 function db() {
   if (!dbPromise) {
     dbPromise = new Promise((resolve, reject) => {
       const req = indexedDB.open(DB_NAME, 1);
       req.onupgradeneeded = () => req.result.createObjectStore(STORE);
-      req.onsuccess = () => resolve(req.result);
-      req.onerror = () => reject(req.error);
+      req.onsuccess = () => {
+        const d = req.result;
+        // Verbindung wurde vom iPhone geschlossen -> beim nächsten Zugriff neu öffnen
+        d.onclose = () => { if (dbPromise) dbPromise = null; };
+        d.onversionchange = () => { d.close(); dbPromise = null; };
+        resolve(d);
+      };
+      req.onerror = () => { dbPromise = null; reject(req.error); };
+      req.onblocked = () => { dbPromise = null; reject(new Error('Speicher blockiert')); };
     });
   }
   return dbPromise;
 }
 
-export async function kvGet(key) {
-  const d = await db();
-  return new Promise((resolve, reject) => {
+/** Führt einen Speicherzugriff aus; schlägt er fehl, wird die Verbindung neu geöffnet und einmal wiederholt. */
+async function withDb(fn) {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const d = await db();
+      return await new Promise((resolve, reject) => {
+        try { fn(d, resolve, reject); } catch (e) { reject(e); }
+      });
+    } catch (e) {
+      try { (await dbPromise)?.close(); } catch {}
+      dbPromise = null;
+      if (attempt >= 1) throw e;
+      await new Promise((r) => setTimeout(r, 150));
+    }
+  }
+}
+
+export function kvGet(key) {
+  return withDb((d, resolve, reject) => {
     const r = d.transaction(STORE).objectStore(STORE).get(key);
     r.onsuccess = () => resolve(r.result);
     r.onerror = () => reject(r.error);
   });
 }
-export async function kvSet(key, value) {
-  const d = await db();
-  return new Promise((resolve, reject) => {
+export function kvSet(key, value) {
+  return withDb((d, resolve, reject) => {
     const tx = d.transaction(STORE, 'readwrite');
     tx.objectStore(STORE).put(value, key);
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error || new Error('Speichern abgebrochen'));
   });
 }
+
+// ---- Notkopie: zweiter, unabhängiger Speicher für den Fall, dass der Hauptspeicher ausfällt
+function writeEmergency(payload) {
+  try {
+    localStorage.setItem(EMERGENCY_KEY, JSON.stringify(payload));
+    return true;
+  } catch {
+    return false;
+  }
+}
+function readEmergency() {
+  try {
+    const o = JSON.parse(localStorage.getItem(EMERGENCY_KEY) || 'null');
+    return o && o.data && o.settings ? o : null;
+  } catch {
+    return null;
+  }
+}
+function clearEmergency() {
+  try { localStorage.removeItem(EMERGENCY_KEY); } catch {}
+}
+
+/** Speicherfehler melden (zeigt die App als roten Hinweis an). */
+const errorListeners = new Set();
+export function onSaveError(fn) { errorListeners.add(fn); }
+export let saveProblem = null; // null | 'emergency' (Notkopie angelegt) | 'lost' (gar kein Speicher)
 
 export function defaultSettings() {
   return {
@@ -69,8 +119,19 @@ const listeners = new Set();
 export function onChange(fn) { listeners.add(fn); }
 
 export async function load() {
-  const data = await kvGet('data');
-  const settings = await kvGet('settings');
+  let data = await kvGet('data');
+  let settings = await kvGet('settings');
+  // Gibt es eine neuere Notkopie (Hauptspeicher war ausgefallen)? Dann diese nehmen und zurückschreiben.
+  const em = readEmergency();
+  if (em && (em.settings.lastChangeAt || 0) >= (settings?.lastChangeAt || 0)) {
+    data = em.data;
+    settings = em.settings;
+    try {
+      await kvSet('data', data);
+      await kvSet('settings', settings);
+      clearEmergency();
+    } catch {}
+  } else if (em) clearEmergency();
   if (data) {
     state.profiles = data.profiles || [];
     state.months = data.months || [];
@@ -90,10 +151,17 @@ export async function save(dataChanged = true) {
     state.settings.lastChangeAt = Date.now();
     if (!state.settings.firstChangeAt) state.settings.firstChangeAt = Date.now();
   }
-  await kvSet('data', {
-    profiles: state.profiles, months: state.months, entries: state.entries, exportConfig: state.exportConfig,
-  });
-  await kvSet('settings', state.settings);
+  const data = { profiles: state.profiles, months: state.months, entries: state.entries, exportConfig: state.exportConfig };
+  try {
+    await kvSet('data', data);
+    await kvSet('settings', state.settings);
+    if (saveProblem === 'emergency') clearEmergency();
+    saveProblem = null;
+  } catch (e) {
+    // Hauptspeicher ausgefallen (bekanntes iPhone-Problem): Notkopie anlegen, Dropbox sichert trotzdem
+    saveProblem = writeEmergency({ data, settings: state.settings, at: Date.now() }) ? 'emergency' : 'lost';
+    for (const fn of errorListeners) fn(saveProblem);
+  }
   for (const fn of listeners) fn(dataChanged);
 }
 

@@ -1,5 +1,5 @@
 import { Calc, Fmt, Months, Shifts, Search, nowStamp, todayDay } from './core.js';
-import { state, Q, load, onChange, deleteMonth, saveSettings } from './store.js';
+import { state, Q, load, onChange, onSaveError, deleteMonth, saveSettings } from './store.js';
 import { esc, icon, topbar, actionSheet, confirmDialog, toast } from './ui.js';
 import { summaryBar, statsCard, dayCard, nextShiftCard, emptyState, fab } from './components.js';
 import { route, go, back, start, setRenderer, restoreScroll, saveScroll } from './nav.js';
@@ -109,12 +109,23 @@ function monthScreen(id, ctx) {
   if (!month) return back('');
   const s = state.settings;
   const all = Q.entriesOf(id);
-  const q = ctx.query || '';
-  const entries = all.filter((e) => Search.matches(e, q)).sort((a, b) => a.date - b.date || a.startMinutes - b.startMinutes);
   const st = Calc.monthStats(month, all, Q.profileOf(month));
-  const now = nowStamp();
-  const next = Shifts.next(state.entries, now);
   const compact = s.monthColumns === 2;
+  const filtered = () => all.filter((e) => Search.matches(e, ctx.query || '')).sort((a, b) => a.date - b.date || a.startMinutes - b.startMinutes);
+  const results = () => {
+    const q = ctx.query || '';
+    const entries = filtered();
+    const now = nowStamp();
+    const next = Shifts.next(state.entries, now);
+    return `${!all.length ? emptyState('Noch keine Tage', 'Tippe auf +, um einen Arbeitstag einzutragen.') : !entries.length ? emptyState('Nichts gefunden', `Kein Tag passt zu „${q}“.`) : ''}
+      <div class="grid ${compact ? 'two' : ''}">
+        ${entries.map((e) => {
+          let badge = '';
+          if (next?.id === e.id) { const l = Shifts.label(e, now); badge = l.startsWith('in ') ? 'Nächste Schicht' : l; }
+          return dayCard(e, month.hourlyRate, s.decimalHours, { compact, badge, act: `day:${id}:${e.id}` });
+        }).join('')}
+      </div>`;
+  };
   root.innerHTML = `
     ${topbar({
       title: Fmt.monthTitle(month), back: true,
@@ -124,35 +135,27 @@ function monthScreen(id, ctx) {
         <button class="iconbtn" data-act="monthmenu:${id}" aria-label="Mehr">${icon('more')}</button>`,
     })}
     <main class="content">
-      ${ctx.searching ? `<input class="search" id="q" type="search" placeholder="Suchen: Tätigkeit, Notiz, Datum …" value="${esc(q)}">` : ''}
-      ${!all.length ? emptyState('Noch keine Tage', 'Tippe auf +, um einen Arbeitstag einzutragen.') : !entries.length ? emptyState('Nichts gefunden', `Kein Tag passt zu „${q}“.`) : ''}
-      <div class="grid ${compact ? 'two' : ''}">
-        ${entries.map((e) => {
-          let badge = '';
-          if (next?.id === e.id) { const l = Shifts.label(e, now); badge = l.startsWith('in ') ? 'Nächste Schicht' : l; }
-          return dayCard(e, month.hourlyRate, s.decimalHours, { compact, badge, act: `day:${id}:${e.id}` });
-        }).join('')}
-      </div>
+      ${ctx.searching ? `<input class="search" id="q" type="search" placeholder="Suchen: Tätigkeit, Notiz, Datum …" value="${esc(ctx.query || '')}">` : ''}
+      <div id="results" class="results">${results()}</div>
     </main>
     ${fab(`newday:${id}`, 'Tag hinzufügen')}
     ${summaryBar(st, s.decimalHours)}`;
 
   const qi = root.querySelector('#q');
   if (qi) {
+    // Nur die Ergebnisliste erneuern – das Suchfeld bleibt stehen (Tastatur bleibt offen)
     qi.addEventListener('input', () => {
       ctx.query = qi.value;
-      render();
-      const n = root.querySelector('#q');
-      n.focus();
-      n.setSelectionRange(n.value.length, n.value.length);
+      root.querySelector('#results').innerHTML = results();
     });
     if (ctx.focusSearch) { qi.focus(); ctx.focusSearch = false; }
   }
   // Beim ersten Öffnen eines laufenden Monats zur nächsten Schicht springen
   if (!ctx.scrolled) {
     ctx.scrolled = true;
-    const today = todayDay();
-    if (!ctx.restored && Months.contains(month, today) && entries.length) {
+    const entries = filtered();
+    const next = Shifts.next(state.entries, nowStamp());
+    if (!ctx.restored && Months.contains(month, todayDay()) && entries.length) {
       const target = root.querySelector(`[data-entry="${next?.monthId === id ? next.id : entries.at(-1).id}"]`);
       target?.scrollIntoView({ block: 'center' });
     }
@@ -166,27 +169,27 @@ function monthScreen(id, ctx) {
 
 function searchScreen(ctx) {
   const s = state.settings;
-  const q = ctx.query || '';
-  const results = q.trim()
-    ? state.entries.filter((e) => Search.matches(e, q)).sort((a, b) => b.date - a.date || b.startMinutes - a.startMinutes)
-    : [];
+  const results = () => {
+    const q = ctx.query || '';
+    const list = q.trim()
+      ? state.entries.filter((e) => Search.matches(e, q)).sort((a, b) => b.date - a.date || b.startMinutes - a.startMinutes)
+      : [];
+    return `${q.trim() && !list.length ? emptyState('Nichts gefunden', `Kein Tag passt zu „${q}“.`) : ''}
+      ${list.length ? `<div class="hint">${list.length} Treffer${list.length > 200 ? ' (die neuesten 200 angezeigt)' : ''}</div>` : ''}
+      <div class="grid">
+        ${list.slice(0, 200).map((e) => dayCard(e, Q.month(e.monthId)?.hourlyRate || 0, s.decimalHours, { act: `day:${e.monthId}:${e.id}` })).join('')}
+      </div>`;
+  };
   root.innerHTML = `
     ${topbar({ title: 'Suche', back: true })}
     <main class="content">
-      <input class="search" id="q" type="search" placeholder="Tätigkeit, Notiz, Datum, Monat …" value="${esc(q)}">
-      ${q.trim() && !results.length ? emptyState('Nichts gefunden', `Kein Tag passt zu „${q}“.`) : ''}
-      ${results.length ? `<div class="hint">${results.length} Treffer${results.length > 200 ? ' (die neuesten 200 angezeigt)' : ''}</div>` : ''}
-      <div class="grid">
-        ${results.slice(0, 200).map((e) => dayCard(e, Q.month(e.monthId)?.hourlyRate || 0, s.decimalHours, { act: `day:${e.monthId}:${e.id}` })).join('')}
-      </div>
+      <input class="search" id="q" type="search" placeholder="Tätigkeit, Notiz, Datum, Monat …" value="${esc(ctx.query || '')}">
+      <div id="results" class="results">${results()}</div>
     </main>`;
   const qi = root.querySelector('#q');
   qi.addEventListener('input', () => {
     ctx.query = qi.value;
-    render();
-    const n = root.querySelector('#q');
-    n.focus();
-    n.setSelectionRange(n.value.length, n.value.length);
+    root.querySelector('#results').innerHTML = results();
   });
   if (!ctx.focused) { ctx.focused = true; qi.focus(); }
   return { back: () => back('') };
@@ -317,6 +320,23 @@ document.addEventListener('visibilitychange', () => {
 
 // ------------------------------------------------------------------ Start
 
+/** Roter Hinweis, wenn der Speicher des iPhones ausgefallen ist. */
+function showSaveError(kind) {
+  if (document.getElementById('save-error')) return;
+  const bar = document.createElement('div');
+  bar.id = 'save-error';
+  bar.className = 'save-error';
+  bar.innerHTML = kind === 'emergency'
+    ? `<b>Speicher des iPhones hat nicht reagiert</b><span>Deine Eingaben sind in einer Notkopie${''} gesichert und gehen nicht verloren. Bitte die App neu laden.</span><button class="btn primary" id="save-error-reload">Neu laden</button>`
+    : `<b>Speichern fehlgeschlagen</b><span>Bitte jetzt nichts mehr eintragen. Die Daten werden – falls verbunden – in Dropbox gesichert. Danach die App ganz schließen und neu öffnen.</span><button class="btn primary" id="save-error-reload">Neu laden</button>`;
+  document.body.appendChild(bar);
+  bar.querySelector('#save-error-reload').onclick = () => {
+    // kurz warten, damit eine laufende Dropbox-Sicherung fertig wird
+    bar.querySelector('#save-error-reload').disabled = true;
+    setTimeout(() => location.reload(), kind === 'emergency' ? 300 : 3000);
+  };
+}
+
 function applyTheme() {
   const t = state.settings.theme;
   document.documentElement.dataset.theme = t === 'LIGHT' ? 'light' : t === 'DARK' ? 'dark' : '';
@@ -330,6 +350,7 @@ async function boot() {
     return;
   }
   applyTheme();
+  onSaveError(showSaveError);
   await initBackup();
   onChange(() => applyTheme());
   setRenderer(render);
@@ -343,16 +364,20 @@ async function boot() {
 if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
   const hadController = !!navigator.serviceWorker.controller;
   navigator.serviceWorker.register('./sw.js').then((reg) => {
+    const showUpdate = (w) => {
+      if (document.querySelector('.update-bar')) return;
+      const bar = document.createElement('button');
+      bar.className = 'update-bar';
+      bar.textContent = 'Neue Version verfügbar – tippen zum Aktualisieren';
+      bar.onclick = () => { saveScroll(); (reg.waiting || w).postMessage('skipWaiting'); };
+      document.body.appendChild(bar);
+    };
+    // Neue Version wurde schon früher geladen, aber noch nicht übernommen -> Hinweis wieder zeigen
+    if (reg.waiting && navigator.serviceWorker.controller) showUpdate(reg.waiting);
     reg.addEventListener('updatefound', () => {
       const w = reg.installing;
       w?.addEventListener('statechange', () => {
-        if (w.state === 'installed' && navigator.serviceWorker.controller) {
-          const bar = document.createElement('button');
-          bar.className = 'update-bar';
-          bar.textContent = 'Neue Version verfügbar – tippen zum Aktualisieren';
-          bar.onclick = () => { saveScroll(); (reg.waiting || w).postMessage('skipWaiting'); };
-          document.body.appendChild(bar);
-        }
+        if (w.state === 'installed' && navigator.serviceWorker.controller) showUpdate(w);
       });
     });
     let reloading = false;

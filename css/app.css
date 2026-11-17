@@ -338,3 +338,11 @@ input.search { margin-bottom: 0; flex: none; }
 /* Samstag und Sonntag: Wochentag und Datum in roter Schrift */
 .card.day.we .card-title, .card.day.we .card-date { color: var(--weekend); opacity: 1; }
 .card.day.we.is-next .card-title, .card.day.we.is-next .card-date { color: var(--weekend); opacity: 1; }
+
+.results { display: flex; flex-direction: column; gap: 12px; flex: none; }
+.save-error {
+  position: fixed; left: 10px; right: 10px; top: calc(env(safe-area-inset-top) + 8px); z-index: 80;
+  background: var(--error-c); color: var(--on-bg); border: 2px solid var(--error); border-radius: 16px; padding: 14px;
+  display: flex; flex-direction: column; gap: 6px; box-shadow: 0 4px 16px rgba(0,0,0,.3); font-size: 14px;
+}
+.save-error b { font-size: 16px; color: var(--error); }

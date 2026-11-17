@@ -22,6 +22,10 @@ export function exportScreen(root, kind, id) {
   const baseName = title.replace(/ /g, '_'); // z. B. November_2026 bzw. 2026
   let cfg = normalizeExportConfig(JSON.parse(JSON.stringify(state.exportConfig)));
 
+  // „PDF öffnen“ zeigt in der Home-Bildschirm-App am iPhone oft nur eine leere Seite -> dort weglassen
+  const ios = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  const standalone = navigator.standalone === true || matchMedia('(display-mode: standalone)').matches;
+  const canOpen = !(ios && standalone);
   const sw = (key, label) => `<label class="switch"><input type="checkbox" data-k="${key}" ${cfg[key] ? 'checked' : ''}><span>${esc(label)}</span></label>`;
   const txt = (key, placeholder) => `<input class="sub-input" data-t="${key}" value="${esc(cfg[key])}" placeholder="${esc(placeholder)}">`;
 
@@ -59,8 +63,8 @@ export function exportScreen(root, kind, id) {
     </main>
     <footer class="bottom-action">
       <div class="row gap">
-        <button class="btn outline" data-act="open">PDF öffnen</button>
-        <button class="btn primary grow" data-act="share">${icon('share', 'tiny')} PDF teilen</button>
+        ${canOpen ? `<button class="btn outline" data-act="open" disabled>PDF öffnen</button>` : ''}
+        <button class="btn primary grow" data-act="share" id="b-share" disabled>PDF wird vorbereitet …</button>
       </div>
     </footer>`;
 
@@ -126,7 +130,12 @@ export function exportScreen(root, kind, id) {
   });
   syncSubs();
   preview();
-  loadFonts(); // Schrift fürs PDF schon jetzt laden
+  // Erst teilen, wenn die Schrift geladen ist (sonst würden türkische Buchstaben vereinfacht)
+  Promise.race([loadFonts(), new Promise((r) => setTimeout(r, 4000))]).then(() => {
+    root.querySelectorAll('[data-act=share],[data-act=open]').forEach((b) => (b.disabled = false));
+    const sb = root.querySelector('#b-share');
+    if (sb) sb.innerHTML = `${icon('share', 'tiny')} PDF teilen`;
+  });
 
   function makeFile() {
     const pdf = buildPdf(doc());

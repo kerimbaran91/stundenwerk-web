@@ -119,10 +119,19 @@ const listeners = new Set();
 export function onChange(fn) { listeners.add(fn); }
 
 export async function load() {
-  let data = await kvGet('data');
-  let settings = await kvGet('settings');
-  // Gibt es eine neuere Notkopie (Hauptspeicher war ausgefallen)? Dann diese nehmen und zurückschreiben.
+  let data, settings;
   const em = readEmergency();
+  try {
+    data = await kvGet('data');
+    settings = await kvGet('settings');
+  } catch (e) {
+    // Hauptspeicher geht gar nicht – mit der Notkopie weiterarbeiten (falls vorhanden)
+    if (!em) throw e;
+    applyLoaded(em.data, em.settings);
+    saveProblem = 'emergency';
+    return;
+  }
+  // Gibt es eine neuere Notkopie (Hauptspeicher war ausgefallen)? Dann diese nehmen und zurückschreiben.
   if (em && (em.settings.lastChangeAt || 0) >= (settings?.lastChangeAt || 0)) {
     data = em.data;
     settings = em.settings;
@@ -132,6 +141,12 @@ export async function load() {
       clearEmergency();
     } catch {}
   } else if (em) clearEmergency();
+  applyLoaded(data, settings);
+  // Bittet iOS/Browser, die Daten nicht automatisch zu löschen
+  try { await navigator.storage?.persist?.(); } catch {}
+}
+
+function applyLoaded(data, settings) {
   if (data) {
     state.profiles = data.profiles || [];
     state.months = data.months || [];
@@ -141,8 +156,6 @@ export async function load() {
   state.settings = Object.assign(defaultSettings(), settings || {});
   if (!state.profiles.length) state.profiles = [defaultProfile()];
   state.loaded = true;
-  // Bittet iOS/Browser, die Daten nicht automatisch zu löschen
-  try { await navigator.storage?.persist?.(); } catch {}
 }
 
 /** Speichert Daten. dataChanged=false bei reinen Anzeige-Einstellungen (kein neues Backup nötig). */
@@ -219,7 +232,8 @@ export async function saveMonth(m) {
     state.months.push(m);
   } else {
     const i = state.months.findIndex((x) => x.id === m.id);
-    state.months[i] = m;
+    if (i >= 0) state.months[i] = m;
+    else state.months.push(m);
   }
   await save();
   return m;
@@ -237,7 +251,8 @@ export async function saveEntry(e) {
     state.entries.push(e);
   } else {
     const i = state.entries.findIndex((x) => x.id === e.id);
-    state.entries[i] = e;
+    if (i >= 0) state.entries[i] = e;
+    else state.entries.push(e); // wurde inzwischen gelöscht -> wieder anlegen statt verlieren
   }
   await save();
   return e;

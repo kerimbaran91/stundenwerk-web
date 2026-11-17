@@ -1,5 +1,6 @@
 import { Calc, Fmt, Months, Shifts, Search, nowStamp, todayDay } from './core.js';
-import { state, Q, load, onChange, onSaveError, deleteMonth, saveSettings } from './store.js';
+import { state, Q, load, onChange, onSaveError, deleteMonth, saveSettings, saveProblem } from './store.js';
+import * as Dropbox from './dropbox.js';
 import { esc, icon, topbar, actionSheet, confirmDialog, toast } from './ui.js';
 import { summaryBar, statsCard, dayCard, nextShiftCard, emptyState, fab } from './components.js';
 import { route, go, back, start, setRenderer, restoreScroll, saveScroll } from './nav.js';
@@ -308,14 +309,16 @@ function nextKey() {
 }
 
 // Anzeige "nächste Schicht" aktuell halten (nur auf Übersichtsseiten)
+// Nicht neu aufbauen, während jemand ins Suchfeld tippt (sonst ginge die Tastatur zu)
+const typing = () => document.activeElement?.id === 'q';
 setInterval(() => {
-  if (document.hidden) return;
+  if (document.hidden || typing()) return;
   const r = route()[0];
   if (r && !['year', 'month'].includes(r)) return;
   if (nextKey() !== lastNextKey) render();
 }, 30000);
 document.addEventListener('visibilitychange', () => {
-  if (!document.hidden && [undefined, 'year', 'month'].includes(route()[0]) && nextKey() !== lastNextKey) render();
+  if (!document.hidden && !typing() && [undefined, 'year', 'month'].includes(route()[0]) && nextKey() !== lastNextKey) render();
 });
 
 // ------------------------------------------------------------------ Start
@@ -327,7 +330,7 @@ function showSaveError(kind) {
   bar.id = 'save-error';
   bar.className = 'save-error';
   bar.innerHTML = kind === 'emergency'
-    ? `<b>Speicher des iPhones hat nicht reagiert</b><span>Deine Eingaben sind in einer Notkopie${''} gesichert und gehen nicht verloren. Bitte die App neu laden.</span><button class="btn primary" id="save-error-reload">Neu laden</button>`
+    ? `<b>Speicher des iPhones hat nicht reagiert</b><span>Deine Daten sind in einer Notkopie gesichert und gehen nicht verloren. Bitte die App ganz schließen (wegwischen) und neu öffnen. Du kannst aber auch normal weiterarbeiten.</span><button class="btn primary" id="save-error-reload">Neu laden</button>`
     : `<b>Speichern fehlgeschlagen</b><span>Bitte jetzt nichts mehr eintragen. Die Daten werden – falls verbunden – in Dropbox gesichert. Danach die App ganz schließen und neu öffnen.</span><button class="btn primary" id="save-error-reload">Neu laden</button>`;
   document.body.appendChild(bar);
   bar.querySelector('#save-error-reload').onclick = () => {
@@ -357,7 +360,12 @@ async function boot() {
   }
   applyTheme();
   onSaveError(showSaveError);
-  await initBackup();
+  try { await initBackup(); } catch (e) { console.error(e); }
+  if (saveProblem) {
+    // Gestartet mit der Notkopie (Hauptspeicher ausgefallen): Hinweis zeigen und sicherheitshalber in Dropbox sichern
+    showSaveError(saveProblem);
+    Dropbox.schedule();
+  }
   onChange(() => applyTheme());
   setRenderer(render);
   // Beim Öffnen direkt die Monate des aktuellen Jahres zeigen; Zurück führt zur Jahresübersicht

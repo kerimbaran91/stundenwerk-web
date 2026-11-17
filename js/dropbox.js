@@ -23,11 +23,25 @@ export const connected = () => !!auth?.refreshToken;
 export const account = () => auth?.account || '';
 export const getStatus = () => status;
 
+const MIRROR_KEY = 'stundenwerk-dropbox';
 export async function init() {
-  auth = (await kvGet('dropbox')) || null;
-  status = Object.assign(status, (await kvGet('dropboxStatus')) || {});
+  try {
+    auth = (await kvGet('dropbox')) || null;
+    status = Object.assign(status, (await kvGet('dropboxStatus')) || {});
+  } catch {
+    // Hauptspeicher ausgefallen -> Zugang aus dem zweiten Speicher holen, damit weiter gesichert wird
+    try {
+      const m = JSON.parse(localStorage.getItem(MIRROR_KEY) || 'null');
+      if (m) { auth = m.auth || null; status = Object.assign(status, m.status || {}); }
+    } catch {}
+  }
+  mirror();
+}
+function mirror() {
+  try { localStorage.setItem(MIRROR_KEY, JSON.stringify({ auth, status })); } catch {}
 }
 async function persist() {
+  mirror();
   try {
     await kvSet('dropbox', auth);
     await kvSet('dropboxStatus', status);
@@ -313,16 +327,18 @@ export function schedule(delay = 1000) {
 export async function syncNow({ force = false } = {}) {
   clearTimeout(timer);
   if (running) { again = true; return new Promise((r) => waiters.push(r)); }
-  if (!connected() || !src) return;
-  if (status.blocked === 'newDevice' && !force) return;
+  // Wird nicht gesichert -> Wartende (z. B. „Jetzt sichern“) trotzdem freigeben
+  const skip = () => { again = false; finishWaiters(); };
+  if (!connected() || !src) return skip();
+  if (status.blocked === 'newDevice' && !force) return skip();
   const data = src.data();
   const prob = shrinkProblem(data.entries.length);
   if (prob && !force) {
     status = { ...status, blocked: 'shrink', blockInfo: prob, pending: true };
     await persist();
-    return;
+    return skip();
   }
-  if (!navigator.onLine) { status.lastError = 'Offline – wird nachgeholt.'; emit(); return; }
+  if (!navigator.onLine) { status.lastError = 'Offline – wird nachgeholt.'; emit(); return skip(); }
   running = true;
   again = false;
   const startVersion = src.version?.();

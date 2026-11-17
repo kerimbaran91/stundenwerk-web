@@ -334,6 +334,8 @@ export const Shifts = {
 // ------------------------------------------------------------------ Dienstplan
 
 const WHATSAPP_PREFIX = /^\[[^\]]{4,30}]\s*[^:]{1,40}:\s*/;
+// Text aus einem exportierten WhatsApp-Chat: "17.11.26, 14:03 - Chef: …"
+const WHATSAPP_EXPORT = /^\d{1,2}[./]\d{1,2}[./]\d{2,4},?\s+\d{1,2}:\d{2}(?::\d{2})?(?:\s*[AaPp]\.?\s?[Mm]\.?)?\s+[-–]\s+[^:]{1,40}:\s*/;
 // Uhrzeit: "16-2", "16:00-02:00", "16.00 – 2.00 Uhr", "16 bis 2", "16h-2h", "1600-0200"
 const TIME_RANGE = /(?<![\d.:/])(\d{1,2})(?:[:.]?(\d{2}))?\s*(?:Uhr|h(?![a-zäöüß]))?\s*(?:-|–|—|bis)\s*(\d{1,2})(?:[:.]?(\d{2}))?(?:\s*(?:Uhr|h(?![a-zäöüß])))?(?![\d.:/])/gi;
 // Datum: "20.11", "20.11.", "20.11.26", "20.11.2026"
@@ -408,7 +410,7 @@ export const RosterParser = {
    */
   parse(text, names, today = todayDay()) {
     const nameRes = names.filter((n) => n.trim()).map((n) => new RegExp('(?<![\\p{L}\\d])' + escapeRe(n.trim()) + '(?![\\p{L}\\d])', 'iu'));
-    const lines = String(text).split(/\r?\n/).map((raw) => raw.replace(WHATSAPP_PREFIX, '').replace(/[  ]/g, ' ').trim());
+    const lines = String(text).split(/\r?\n/).map((raw) => raw.replace(WHATSAPP_PREFIX, '').replace(WHATSAPP_EXPORT, '').replace(/[  ]/g, ' ').trim());
     const noName = !lines.some((l) => nameRes.some((r) => r.test(l)));
     const shifts = [];
     const unrecognized = [];
@@ -513,14 +515,13 @@ function toDate(day, month, y, today) {
     const year = y.length === 2 ? 2000 + +y : +y;
     return validDate(year, month, day) ? epochDay(year, month, day) : null;
   }
-  const ty = ymd(today).y;
-  let best = null;
-  for (const yy of [ty - 1, ty, ty + 1]) {
-    if (!validDate(yy, month, day)) continue;
-    const d = epochDay(yy, month, day);
-    if (best == null || Math.abs(d - today) < Math.abs(best - today)) best = d;
-  }
-  return best;
+  // Ohne Jahr: aktuelles Jahr. Ausnahme Jahreswechsel: Plan im Okt–Dez mit Datum im Jan–März -> nächstes Jahr,
+  // Plan im Jan–März mit Datum im Okt–Dez -> voriges Jahr.
+  const { y: ty, m: tm } = ymd(today);
+  let year = ty;
+  if (tm >= 10 && month <= 3) year = ty + 1;
+  else if (tm <= 3 && month >= 10) year = ty - 1;
+  return validDate(year, month, day) ? epochDay(year, month, day) : null;
 }
 
 // ------------------------------------------------------------------ Export (PDF-Tabelle)

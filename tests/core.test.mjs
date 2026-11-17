@@ -233,6 +233,22 @@ check('ueberschrift halle 3-4', hd.shifts.map((x) => x.activity), ['Halle 3-4 Ob
 const hd2 = RosterParser.parse('Halle 3-4 Objekt\n20.11 16-02 +5', [], today);
 check('ueberschrift ohne namen', [hd2.shifts.length, hd2.shifts[0]?.activity, hd2.unrecognized.length, hd2.looksOwn], [1, 'Halle 3-4 Objekt', 0, true]);
 check('gruppenzeile ohne datum bleibt keine ueberschrift', RosterParser.parse('Sa 05.12.\n06:00-14:00 Fuat\n22-6 Kerim', ['Kerim'], today).shifts[0]?.activity, '');
+// Jahr ohne Jahresangabe: aktuelles Jahr, nur am Jahreswechsel das Nachbarjahr
+const yOf = (txt, td) => { const x = RosterParser.parse(txt, ['Kerim'], td).shifts[0]; return x ? ymd(x.date).y : null; };
+const nov17 = D(2026, 11, 17);
+check('mai ohne jahr im november = aktuelles jahr', yOf('So 14.5. 16-2 Kerim', nov17), 2026);
+check('april ohne jahr im november', yOf('15.4. 16-2 Kerim', nov17), 2026);
+check('januar im november = naechstes jahr', yOf('4.1. 16-2 Kerim', nov17), 2027);
+check('maerz im oktober = naechstes jahr', yOf('2.3. 16-2 Kerim', D(2026, 10, 1)), 2027);
+check('dezember im januar = voriges jahr', yOf('28.12. 16-2 Kerim', D(2027, 1, 5)), 2026);
+check('juni im januar = aktuelles jahr', yOf('3.6. 16-2 Kerim', D(2027, 1, 5)), 2027);
+check('29.2. ohne schaltjahr', RosterParser.parse('29.2. 16-2 Kerim', ['Kerim'], D(2026, 5, 1)).unrecognized.length, 1);
+// WhatsApp-Chat-Export
+const wa = (txt) => RosterParser.parse(txt, ['Kerim'], nov17).shifts.map((x) => [ymd(x.date).d, ymd(x.date).m]);
+check('whatsapp export datum', wa('17.11.26, 14:03 - Chef: Mo 23.11. 16-2 Kerim'), [[23, 11]]);
+check('whatsapp export slash am/pm', wa('11/17/26, 2:03 PM - Chef: Mo 23.11. 16-2 Kerim'), [[23, 11]]);
+check('whatsapp export ohne datum unerkannt', RosterParser.parse('17.11.26, 14:03 - Chef: Kerim 16-2', ['Kerim'], nov17).unrecognized, ['Kerim 16-2']);
+check('whatsapp kopie bleibt', wa('[17.11.26, 14:03:22] Chef: Mo 23.11. 16-2 Kerim'), [[23, 11]]);
 check('namen trennen', RosterParser.splitNames('Kerim, Kerim B.; '), ['Kerim', 'Kerim B.']);
 
 // --- Nächste Schicht

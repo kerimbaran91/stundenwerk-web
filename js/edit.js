@@ -249,6 +249,24 @@ export function monthEditScreen(root, id, year) {
     }
   });
 
+  // Eigener Zeitraum: Ändert man Monat oder Jahr, wandern Von/Bis mit – solange sie noch auf den alten Monat zeigen
+  let prevBounds = { y: m.year, mo: m.month };
+  const onMonthChange = () => {
+    const mo = +$('f-month').value, y = +$('f-year').value;
+    if (!(y >= 2000 && y <= 2100)) return;
+    if ($('f-custom').checked) {
+      const oldFrom = isoDate(epochDay(prevBounds.y, prevBounds.mo, 1));
+      const oldTo = isoDate(Months.lastDay({ year: prevBounds.y, month: prevBounds.mo }));
+      if ($('f-from').value === oldFrom && $('f-to').value === oldTo) {
+        $('f-from').value = isoDate(epochDay(y, mo, 1));
+        $('f-to').value = isoDate(Months.lastDay({ year: y, month: mo }));
+      }
+    }
+    prevBounds = { y, mo };
+  };
+  $('f-month').addEventListener('change', onMonthChange);
+  $('f-year').addEventListener('change', onMonthChange);
+
   function read() {
     const err = (t) => { $('e-main').textContent = t; return null; };
     const y = +$('f-year').value;

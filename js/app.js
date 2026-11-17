@@ -340,6 +340,12 @@ function showSaveError(kind) {
 function applyTheme() {
   const t = state.settings.theme;
   document.documentElement.dataset.theme = t === 'LIGHT' ? 'light' : t === 'DARK' ? 'dark' : '';
+  // Farbe der Statusleiste oben an das gewählte Design anpassen
+  const [light, dark] = document.querySelectorAll('meta[name="theme-color"]');
+  if (light && dark) {
+    light.content = t === 'DARK' ? '#0F1312' : '#F6FAF8';
+    dark.content = t === 'LIGHT' ? '#F6FAF8' : '#0F1312';
+  }
 }
 
 async function boot() {

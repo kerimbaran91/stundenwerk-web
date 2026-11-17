@@ -181,7 +181,7 @@ function dropboxSection() {
     return `${st.lastError ? `<p class="small bad">${esc(st.lastError)}</p>` : ''}
       <p class="small">Sichert alle Daten automatisch nach jeder Änderung in deine Dropbox (Ordner „Apps“). Tageskopien der letzten 90 Tage bleiben erhalten, ältere als eine Kopie pro Monat.</p>
       <ol class="small steps">
-        <li><a class="btn outline" id="dbx-login" href="${esc(authUrl)}" target="_blank" rel="noopener">Bei Dropbox anmelden</a></li>
+        <li><a class="btn outline" id="dbx-login" href="${authUrl ? esc(authUrl) : '#'}" target="_blank" rel="noopener">Bei Dropbox anmelden</a></li>
         <li>„Zulassen“ tippen und den angezeigten <b>Code kopieren</b></li>
         <li>Hierher zurück und den Code einfügen:</li>
       </ol>
@@ -267,6 +267,14 @@ export function settingsScreen(root) {
     </main>`;
 
   const $ = (id) => root.querySelector('#' + id);
+
+  // Anmelde-Link erst nutzen, wenn die Adresse fertig ist (dauert einen Augenblick)
+  root.querySelector('main').addEventListener('click', (ev) => {
+    if (ev.target.closest('#dbx-login') && !authUrl) {
+      ev.preventDefault();
+      toast('Einen Moment bitte – gleich nochmal tippen');
+    }
+  });
 
   if (Dropbox.configured() && !Dropbox.connected()) {
     Dropbox.startAuth().then((u) => {

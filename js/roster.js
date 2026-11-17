@@ -78,7 +78,7 @@ export function rosterScreen(root) {
       </div>`;
     });
     if (result.unrecognized.length) {
-      html += `<section class="card warn"><h3>Nicht verstanden</h3><p class="small">Diese Zeilen enthalten deinen Namen, aber kein Datum oder keine Uhrzeit. Bitte von Hand eintragen:</p>
+      html += `<section class="card warn"><h3>Nicht verstanden</h3><p class="small">${result.nameInText === false ? 'Diese Zeilen haben eine Uhrzeit, aber kein Datum.' : 'Diese Zeilen enthalten deinen Namen, aber kein Datum oder keine Uhrzeit.'} Bitte von Hand eintragen:</p>
         ${result.unrecognized.map((l) => `<div class="mono small">${esc(l)}</div>`).join('')}</section>`;
     }
     $('out').innerHTML = html;

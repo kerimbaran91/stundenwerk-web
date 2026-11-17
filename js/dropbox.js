@@ -267,6 +267,8 @@ async function cleanup() {
 let timer = null;
 let running = false;
 let again = false; // während einer laufenden Sicherung wurde etwas geändert -> danach sofort nochmal sichern
+let waiters = []; // warten auf das Ende der laufenden Sicherung (z. B. „Jetzt sichern“)
+function finishWaiters() { const w = waiters; waiters = []; w.forEach((r) => r()); }
 let src = null; // { data(): App-Daten, json(compact): Backup-Text, version(): Zeitstempel der letzten Änderung }
 let quick = null; // vorbereitete komprimierte Kopie: { version, gz, entries }
 
@@ -310,7 +312,7 @@ export function schedule(delay = 1000) {
 /** force: auch sichern, wenn die Sicherung wegen weniger Einträge pausiert ist. */
 export async function syncNow({ force = false } = {}) {
   clearTimeout(timer);
-  if (running) { again = true; return; }
+  if (running) { again = true; return new Promise((r) => waiters.push(r)); }
   if (!connected() || !src) return;
   if (status.blocked === 'newDevice' && !force) return;
   const data = src.data();
@@ -357,7 +359,10 @@ export async function syncNow({ force = false } = {}) {
   if (again && status.pending && connected()) {
     again = false;
     syncNow();
+    return;
   }
+  again = false;
+  finishWaiters();
 }
 
 /** Nach bewusstem Wiederherstellen/Behalten: neuer Vergleichswert für den Schutz vor Überschreiben. */

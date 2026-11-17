@@ -216,6 +216,12 @@ check('+7.5 mit datum', RosterParser.parse('Mo 23.11. 16-2 +7.5 Kerim', ['Kerim'
 const yr = ExportBuilder.build('2026', [{ month, entries, profile: null }, { month: { ...month, id: 2, month: 10 }, entries: [], profile: null }], cfg);
 check('jahres-pdf ohne leeren monat', yr.sections.map((x) => x.title), ['November 2026']);
 check('einzelner leerer monat bleibt', ExportBuilder.build('x', [{ month, entries: [], profile: null }], cfg).sections.length, 1);
+// Überschrift mit Zahlenbereich
+const hd = RosterParser.parse('Halle 3-4 Objekt\nMo 23.11. 16-2 Kerim', ['Kerim'], today);
+check('ueberschrift halle 3-4', hd.shifts.map((x) => x.activity), ['Halle 3-4 Objekt']);
+const hd2 = RosterParser.parse('Halle 3-4 Objekt\n20.11 16-02 +5', [], today);
+check('ueberschrift ohne namen', [hd2.shifts.length, hd2.shifts[0]?.activity, hd2.unrecognized.length, hd2.looksOwn], [1, 'Halle 3-4 Objekt', 0, true]);
+check('gruppenzeile ohne datum bleibt keine ueberschrift', RosterParser.parse('Sa 05.12.\n06:00-14:00 Fuat\n22-6 Kerim', ['Kerim'], today).shifts[0]?.activity, '');
 check('namen trennen', RosterParser.splitNames('Kerim, Kerim B.; '), ['Kerim', 'Kerim B.']);
 
 // --- Nächste Schicht

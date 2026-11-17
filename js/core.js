@@ -442,8 +442,16 @@ export const RosterParser = {
       const am = findAmount(restForMoney);
       const amount = am ? am.v : null;
       const extraWords = hasNames(am ? removeRange(restForMoney, am.m) : restForMoney);
+      // Überschrift ganz oben mit Zahlenbereich, z. B. "Halle 3-4 Objekt": ist eine Tätigkeit, keine Uhrzeit
+      const hasMyName = nameRes.some((r) => r.test(line));
+      if (time && !dateMatch && currentDate == null && !shifts.length && !hasMyName && amount == null &&
+          extraWords && /^\p{L}/u.test(line) && line.length <= 60) {
+        currentActivity = line;
+        resetBlock();
+        return;
+      }
       // Ohne Namen im Text: jede Zeile mit Uhrzeit ist eine eigene Schicht
-      const mine = noName ? !!time : nameRes.some((r) => r.test(line));
+      const mine = noName ? !!time : hasMyName;
 
       if (!mine) {
         if (dateMatch) { currentDate = dateMatch.d; resetBlock(); }
@@ -486,7 +494,7 @@ export const RosterParser = {
       });
       lastShiftLine = idx;
     });
-    return { shifts, unrecognized, noName: noName && shifts.length > 0, looksOwn };
+    return { shifts, unrecognized, noName: noName && shifts.length > 0, looksOwn, nameInText: !noName };
   },
 };
 

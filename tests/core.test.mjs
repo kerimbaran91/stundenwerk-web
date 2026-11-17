@@ -1,5 +1,5 @@
 // Übertragen aus CoreTest.kt der Android-App. Start: node tests/core.test.mjs
-import { TimeMath, Fmt, Calc, Months, ExportBuilder, defaultExportConfig, RosterParser, Shifts, epochDay, ymd, MINUTES_PER_DAY } from '../js/core.js';
+import { TimeMath, Fmt, Calc, Months, ExportBuilder, defaultExportConfig, normalizeExportConfig, RosterParser, Shifts, epochDay, ymd, MINUTES_PER_DAY } from '../js/core.js';
 import { backupFrom, backupTo, verifyBackup } from '../js/backup.js';
 
 let failures = 0;
@@ -92,7 +92,10 @@ check('export spalten', sec.columns.map((c) => c.title), ['Datum', 'Tätigkeit',
 check('export zeile 1', sec.rows[0].cells, ['02.11.2026', 'Objekt A', '16:00', '02:00', '10', '+15,00 €']);
 check('export samstag markiert', sec.rows[6].highlight, true);
 check('export freitag nicht markiert', sec.rows[5].highlight, false);
-check('export summe', sec.total.cells, ['', '', '', '', '160', '240,00 €']);
+check('export summe (standard: sprit-summe aus)', sec.total.cells, ['', '', '', '', '160', '']);
+check('standard summen aus', [cfg.totalWageOn, cfg.totalAllowanceOn], [false, false]);
+check('alte einstellung wird einmalig umgestellt', [normalizeExportConfig({ totalWageOn: true, totalAllowanceOn: true }).totalWageOn, normalizeExportConfig({ totalWageOn: true, totalAllowanceOn: true }).totalAllowanceOn], [false, false]);
+check('danach bleibt eigene wahl', normalizeExportConfig({ totalWageOn: true, totalAllowanceOn: true, totalsDefaultOff: true }).totalWageOn, true);
 check('export titel', sec.titleLines, ['November 2026']);
 const cfg2 = {
   ...cfg, decimal: false, headingOn: true, employeeOn: true, employee: 'Max Muster', periodOn: true, signEmployeeOn: true,

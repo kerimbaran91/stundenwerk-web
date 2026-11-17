@@ -559,13 +559,20 @@ export function defaultExportConfig() {
     personnelNoOn: false, personnelNo: '', periodOn: false, periodLabel: 'Abrechnungszeitraum',
     overtimeOn: false, overtimeLabel: 'Überstunden', signEmployeeOn: false, signEmployee: 'Unterschrift Mitarbeiter/in',
     signSiteOn: false, signSite: 'Unterschrift Einsatzstelle', highlightWeekends: true,
-    totalWageOn: true, totalAllowanceOn: true, // Summenzeile: Verdienst bzw. Sprit unten anzeigen
+    // Summenzeile: Verdienst bzw. Sprit unten anzeigen – standardmäßig aus (Gesamt bleibt immer)
+    totalWageOn: false, totalAllowanceOn: false, totalsDefaultOff: true,
     columns: COLUMNS.map((c) => defaultColumn(c[0])),
   };
 }
 export function normalizeExportConfig(cfg) {
   const d = defaultExportConfig();
   const c = Object.assign({}, d, cfg || {});
+  // Einmalig: ältere gespeicherte Einstellungen bekommen den neuen Standard (Summen Verdienst/Sprit aus)
+  if (cfg && !cfg.totalsDefaultOff) {
+    c.totalWageOn = false;
+    c.totalAllowanceOn = false;
+    c.totalsDefaultOff = true;
+  }
   const seen = new Map();
   for (const col of c.columns || []) {
     if (!COLUMNS.some((x) => x[0] === col.id) || seen.has(col.id)) continue;

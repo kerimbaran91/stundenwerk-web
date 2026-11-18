@@ -101,7 +101,7 @@ export function rosterScreen(root) {
     parse();
     const v = $('f-names').value.trim();
     clearTimeout(saveTimer);
-    saveTimer = setTimeout(() => saveSettings({ rosterNames: v }), 500);
+    saveTimer = setTimeout(() => saveSettings({ rosterNames: v }, true), 500);
   });
   $('f-text').addEventListener('input', parse);
   $('out').addEventListener('change', (ev) => {
@@ -170,7 +170,7 @@ export function rosterScreen(root) {
     async import() {
       const chosen = result.shifts.map((_, i) => i).filter(isSel).map(shiftAt);
       if (!chosen.length) return;
-      await saveSettings({ rosterNames: $('f-names').value.trim() });
+      await saveSettings({ rosterNames: $('f-names').value.trim() }, true);
       const msg = await importShifts(chosen);
       toast(msg, 3500);
       back('');

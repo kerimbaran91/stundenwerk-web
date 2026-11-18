@@ -315,9 +315,9 @@ input.search { margin-bottom: 0; flex: none; }
 .modal-btns .btn.text { color: var(--primary); }
 .modal-btns .btn.danger { background: var(--error); color: #fff; }
 .sheet-wrap { align-items: flex-end; padding: 0 8px calc(8px + env(safe-area-inset-bottom)); }
-.sheet { max-height: 80vh; overflow-y: auto; width: 100%; max-width: 500px; display: flex; flex-direction: column; gap: 1px; background: var(--outline-v); border-radius: 16px; overflow: hidden; animation: up .18s; }
+.sheet { max-height: 80vh; overflow-y: auto; width: 100%; max-width: 500px; display: flex; flex-direction: column; gap: 1px; background: var(--outline-v); border-radius: 16px; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; animation: up .18s; }
 .sheet-title { background: var(--s1); padding: 12px; text-align: center; font-size: 13px; color: var(--muted); }
-.sheet-item { background: var(--s1); border: 0; padding: 16px; font-size: 18px; color: var(--primary); cursor: pointer; }
+.sheet-item { flex-shrink: 0; background: var(--s1); border: 0; padding: 16px; font-size: 18px; color: var(--primary); cursor: pointer; }
 .sheet-item:active { background: var(--s3); }
 .sheet-item.danger { color: var(--error); }
 .sheet-item.cancel { margin-top: 8px; font-weight: 650; border-radius: 16px; }

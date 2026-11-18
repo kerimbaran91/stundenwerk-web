@@ -269,8 +269,9 @@ export async function saveProfile(p) {
 }
 
 export async function saveExportConfig(cfg) {
+  // Gehört ins Backup (Name, Personalnummer, Spalten) – deshalb als Datenänderung sichern
   state.exportConfig = normalizeExportConfig(cfg);
-  await save(false);
+  await save(true);
 }
 
 /** Schichten aus dem Dienstplan eintragen; fehlende Monate werden angelegt. */

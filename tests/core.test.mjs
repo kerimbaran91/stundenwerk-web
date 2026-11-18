@@ -295,5 +295,33 @@ try { verifyBackup(compact.slice(0, -40), big); } catch (e) { verr = e.message; 
 check('pruefung erkennt abgeschnittene datei', verr !== '', true);
 check('umlaute bleiben', backupFrom(backupTo({ ...big, entries: [{ ...entries[0], activity: 'Flüchtlingsunterkunft „Süd“ – 15 €' }] }, { compact: true })).entries[0].activity, 'Flüchtlingsunterkunft „Süd“ – 15 €');
 
+// --- 1.4.6: Befunde der unabhängigen Prüfung
+{
+  const t = D(2026, 11, 13);
+  const P = (txt, n = ['Kerim']) => RosterParser.parse(txt, n, t).shifts.map((x) => [x.date, x.startMinutes, x.endMinutes, x.allowance, x.activity]);
+  check('F1 namenszeile anderer keine taetigkeit', P('Fußball Regensburg\nSa 21.11.\n18-23 Uhr\nFuat Enes\nSo 22.11.\n10-15 Uhr\nKerim'), [[D(2026, 11, 22), 600, 900, 0, 'Fußball Regensburg']]);
+  check('F1 zwei zeiten ein block', P('Objekt Nord\nSa 21.11.\n06-14 Uhr\nFuat\n14-22 Uhr\nKerim'), [[D(2026, 11, 21), 840, 1320, 0, 'Objekt Nord']]);
+  check('F1 neue ueberschrift ueber block', P('Fußball\nSa 21.11.\n18-23 Uhr\nFuat\nKonzert Landshut\nSo 22.11.\n10-15 Uhr\nKerim')[0][4], 'Konzert Landshut');
+  check('hinweiszeile keine taetigkeit', P('Objekt Nord\nMo 23.11. 16-2 Kerim\nBitte Ausweis mitnehmen\nDi 24.11. 16-2 Kerim').map((x) => x[4]), ['Objekt Nord', 'Objekt Nord']);
+  check('ueberschrift unter datum', P('Sa 05.12.\nObjekt Nord\n22-6 Kerim')[0][4], 'Objekt Nord');
+  check('F2 betrag in datumszeile', P('Fußball Regensburg\nSo 22.11. +5€\n10-15 Uhr\nKerim Fuat')[0][3], 5);
+  check('F3 tuerkisches I', P('Mo 23.11. 16-2 KERİM\nDi 24.11. 16-2 Fuat').length, 1);
+  check('F3 name mit İ eingestellt', P('Mo 23.11. 16-2 Kerim', ['KERİM']).length, 1);
+  check('name nicht als wortteil', P('Mo 23.11. 16-2 Kerimcan\nDi 24.11. 16-2 Kerim').map((x) => x[0]), [D(2026, 11, 24)]);
+  check('F4 betrag 15,-€', P('Mo 23.11. 16-2 15,-€ Kerim')[0][3], 15);
+  check('ohne lookbehind: zahl vor datum', P('Mo 123.11. 16-2 Kerim').length, 0);
+  check('ohne lookbehind: iso', P('2026-11-20 16-2 Kerim')[0][0], D(2026, 11, 20));
+  check('F5 halber cent', Calc.wageCents(630, 13.91), 14606);
+  check('F5 halber cent 2', Calc.wageCents(1410, 13.91), 32689);
+  let bad = 0;
+  for (let rc = 1000; rc <= 3000; rc++) for (const min of [30, 90, 330, 630, 2970]) {
+    if (Calc.wageCents(min, rc / 100) !== Math.floor((min * rc * 2 + 60) / 120)) bad++;
+  }
+  check('F5 alle halben cent', bad, 0);
+  check('cent betrag', Calc.cents(1.005), 101);
+  const broken = normalizeExportConfig({ totalsDefaultOff: true, columns: [null, { id: 'DATE', customTitle: 5 }], heading: null, headingOn: true, employee: null, employeeOn: true });
+  check('F9 kaputte einstellungen', [broken.heading, broken.employee, broken.columns.find((c) => c.id === 'DATE').customTitle, broken.columns.length], ['Stundenerfassung', '', '', defaultExportConfig().columns.length]);
+}
+
 if (failures) { console.log(`${failures} Prüfung(en) fehlgeschlagen`); process.exit(1); }
 console.log('Alle Prüfungen bestanden');

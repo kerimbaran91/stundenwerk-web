@@ -61,7 +61,7 @@ function b64url(bytes) {
 export async function startAuth({ fresh = false } = {}) {
   // Gleichen Schlüssel wiederverwenden, falls die App zwischendurch neu geladen wurde
   const saved = await kvGet('dropboxVerifier');
-  const reuse = !fresh && saved && typeof saved === 'object' && Date.now() - saved.at < 15 * 60000;
+  const reuse = !fresh && saved && typeof saved === 'object' && Date.now() - saved.at < 24 * 3600000; // 24 h: iOS kann die App während der Anmeldung in Safari beenden
   const verifier = reuse ? saved.verifier : b64url(crypto.getRandomValues(new Uint8Array(48)));
   const challenge = b64url(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier))));
   if (!reuse) await kvSet('dropboxVerifier', { verifier, at: Date.now() });
@@ -192,15 +192,32 @@ export async function downloadLatest() {
   if (!quickText) return main;
   let mainAt = 0;
   try { mainAt = backupFrom(main).createdAt; } catch { return quickText; }
-  return backupFrom(quickText).createdAt > mainAt ? quickText : main;
+  let quickAt = 0;
+  try { quickAt = backupFrom(quickText).createdAt; } catch { return main; } // kaputte Kopie vom Schließen: ignorieren
+  return quickAt > mainAt ? quickText : main;
 }
 
 /** Infos über das Backup in Dropbox (für „neues iPhone“). null = es gibt noch keins. */
 export async function remoteInfo() {
   let text;
   try { text = await downloadLatest(); } catch (e) { if (/noch kein Backup/.test(e.message)) return null; throw e; }
-  const b = backupFrom(text);
+  let b;
+  try { b = backupFrom(text); } catch (e) {
+    const err = new Error('Das Backup in Dropbox ist nicht lesbar: ' + e.message);
+    err.unreadable = true;
+    throw err;
+  }
   return { text, backup: b, months: b.months.length, entries: b.entries.length, createdAt: b.createdAt };
+}
+
+/** Unlesbare Hauptdatei vor dem Überschreiben als Kopie aufheben (nie etwas wegwerfen). */
+export async function keepUnreadableCopy() {
+  const stamp = new Date().toISOString().slice(0, 19).replace(/[T:]/g, '-');
+  try {
+    await apiJson('https://api.dropboxapi.com/2/files/copy_v2', { from_path: MAIN_FILE, to_path: `/Stundenwerk-Backup-unlesbar-${stamp}.json`, autorename: true });
+  } catch (e) {
+    if (e.status !== 409) throw e; // 409: Hauptdatei gibt es nicht (nur die Kopie vom Schließen war kaputt)
+  }
 }
 
 export async function download(path = MAIN_FILE) {

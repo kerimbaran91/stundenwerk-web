@@ -289,7 +289,7 @@ export function settingsScreen(root) {
   $('s-names').addEventListener('input', () => {
     const v = $('s-names').value.trim();
     clearTimeout(t1);
-    t1 = setTimeout(() => saveSettings({ rosterNames: v }), 400);
+    t1 = setTimeout(() => saveSettings({ rosterNames: v }, true), 400);
   });
 
   // Standardwerte
@@ -409,7 +409,23 @@ async function decideAfterConnect() {
   try {
     info = await Dropbox.remoteInfo();
   } catch (e) {
-    toast('Dropbox-Backup konnte nicht geprüft werden – bitte später „Jetzt sichern“ tippen', 4500);
+    if (!e.unreadable) {
+      toast('Dropbox-Backup konnte nicht geprüft werden – bitte später „Jetzt sichern“ tippen', 4500);
+      return;
+    }
+    // Datei kaputt oder von einer neueren App-Version: sonst bliebe die Sicherung für immer pausiert
+    const ok = await confirmDialog('Backup in Dropbox nicht lesbar',
+      `Die Datei in Dropbox ist beschädigt oder stammt von einer neueren App-Version. Mit den ${state.entries.length} Tagen von diesem iPhone neu sichern? Die alte Datei bleibt als Kopie in Dropbox erhalten, die Tageskopien im Verlauf auch.`,
+      'Neu sichern');
+    if (!ok) return;
+    try {
+      await Dropbox.keepUnreadableCopy();
+    } catch {
+      toast('Dropbox nicht erreichbar – bitte später nochmal', 4000);
+      return;
+    }
+    await Dropbox.setBaseline(null);
+    await Dropbox.syncNow({ force: true });
     return;
   }
   const local = state.entries.length;

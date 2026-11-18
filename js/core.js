@@ -232,10 +232,12 @@ export const Entries = {
 
 export const Calc = {
   cents(euros) {
-    return Math.round((euros || 0) * 100);
+    return Math.round(+((euros || 0) * 100).toFixed(4));
   },
   wageCents(minutes, rate) {
-    return Math.round((minutes * rate * 100) / 60);
+    // Mit ganzen Zahlen rechnen (Lohn in 1/100 Cent), sonst wird z. B. 146,055 € wegen Gleitkomma auf 146,05 statt 146,06 gerundet
+    const rate4 = Math.round((rate || 0) * 10000);
+    return Math.round((Math.round(minutes || 0) * rate4) / 6000);
   },
   dayWageCents(e, monthRate) {
     return Calc.wageCents(Entries.worked(e), Entries.rate(e, monthRate));
@@ -337,18 +339,18 @@ const WHATSAPP_PREFIX = /^\[[^\]]{4,30}]\s*[^:]{1,40}:\s*/;
 // Text aus einem exportierten WhatsApp-Chat: "17.11.26, 14:03 - Chef: …"
 const WHATSAPP_EXPORT = /^\d{1,2}[./]\d{1,2}[./]\d{2,4},?\s+\d{1,2}:\d{2}(?::\d{2})?(?:\s*[AaPp]\.?\s?[Mm]\.?)?\s+[-–]\s+[^:]{1,40}:\s*/;
 // Uhrzeit: "16-2", "16:00-02:00", "16.00 – 2.00 Uhr", "16 bis 2", "16h-2h", "1600-0200"
-const TIME_RANGE = /(?<![\d.:/])(\d{1,2})(?:[:.]?(\d{2}))?\s*(?:Uhr|h(?![a-zäöüß]))?\s*(?:-|–|—|bis)\s*(\d{1,2})(?:[:.]?(\d{2}))?(?:\s*(?:Uhr|h(?![a-zäöüß])))?(?![\d.:/])/gi;
+const TIME_RANGE = /(\d{1,2})(?:[:.]?(\d{2}))?\s*(?:Uhr|h(?![a-zäöüß]))?\s*(?:-|–|—|bis)\s*(\d{1,2})(?:[:.]?(\d{2}))?(?:\s*(?:Uhr|h(?![a-zäöüß])))?(?![\d.:/])/gi;
 // Datum: "20.11", "20.11.", "20.11.26", "20.11.2026"
-const DATE_RE = /(?<![\d.])(\d{1,2})\.(\d{1,2})(?:\.(\d{4}|\d{2}))?\.?(?!\d)/g;
+const DATE_RE = /(\d{1,2})\.(\d{1,2})(?:\.(\d{4}|\d{2}))?\.?(?!\d)/g;
 // Datum: "20/11", "20/11/2026"
-const DATE_SLASH = /(?<![\d/])(\d{1,2})\/(\d{1,2})(?:\/(\d{4}|\d{2}))?(?![\d/])/g;
+const DATE_SLASH = /(\d{1,2})\/(\d{1,2})(?:\/(\d{4}|\d{2}))?(?![\d/])/g;
 // Datum: "20. November", "20. Nov.", "20 Nov 2026"
 const MONTHS_RE = 'januar|jan|februar|feb|märz|maerz|mär|mrz|april|apr|mai|juni|jun|juli|jul|august|aug|september|sept|sep|oktober|okt|november|nov|dezember|dez';
-const DATE_NAME = new RegExp(`(?<!\\d)(\\d{1,2})\\.?\\s*(${MONTHS_RE})\\.?(?:\\s+(\\d{4}))?(?![\\p{L}])`, 'giu');
+const DATE_NAME = new RegExp(`(\\d{1,2})\\.?\\s*(${MONTHS_RE})\\.?(?:\\s+(\\d{4}))?(?![\\p{L}])`, 'giu');
 // Datum: "2026-11-20"
-const DATE_ISO = /(?<!\d)(\d{4})-(\d{1,2})-(\d{1,2})(?!\d)/;
+const DATE_ISO = /(\d{4})-(\d{1,2})-(\d{1,2})(?!\d)/;
 const PLUS_AMOUNT = /\+\s*(\d{1,4}(?:[.,]\d{1,2})?)\s*(?:€|EUR|Euro)?/i;
-const EURO_AMOUNT = /(?<![\d.,])(\d{1,4}(?:[.,]\d{1,2})?)\s*(?:€|EUR\b|Euro\b)/i;
+const EURO_AMOUNT = /(\d{1,4}(?:[.,]\d{1,2})?)(?:\s*[.,]-{1,2})?\s*(?:€|EUR\b|Euro\b)/i;
 const WORD_AMOUNT = /(?:sprit(?:geld)?|fahrgeld|fahrtgeld|fahrtkosten|benzin|extra)\s*:?\s*\+?\s*(\d{1,4}(?:[.,]\d{1,2})?)/i;
 const LETTERS = /\p{L}{3,}/u;
 
@@ -361,6 +363,28 @@ function removeRange(s, m) {
   return s.slice(0, m.index) + s.slice(m.index + m[0].length);
 }
 
+// Zeichen, die direkt vor einem Treffer nicht stehen dürfen. Ersetzt Lookbehind "(?<!…)",
+// das Safari erst ab iOS 16.4 kennt – sonst startet die App auf älteren iPhones gar nicht.
+const NOT_BEFORE = new Map([
+  [TIME_RANGE, /[\d.:/]/], [DATE_RE, /[\d.]/], [DATE_SLASH, /[\d/]/], [DATE_NAME, /\d/], [DATE_ISO, /\d/], [EURO_AMOUNT, /[\d.,]/],
+]);
+/** Alle Treffer, bei denen davor kein verbotenes Zeichen steht (wie Lookbehind) */
+function* matchesOf(re, s, bad = NOT_BEFORE.get(re)) {
+  const g = new RegExp(re.source, re.flags.includes('g') ? re.flags : re.flags + 'g');
+  let m;
+  while ((m = g.exec(s))) {
+    if (bad && m.index > 0 && bad.test(s[m.index - 1])) { g.lastIndex = m.index + 1; continue; }
+    yield m;
+    if (!m[0]) g.lastIndex++;
+  }
+}
+function firstOf(re, s, bad) {
+  for (const m of matchesOf(re, s, bad)) return m;
+  return null;
+}
+// Türkisches „İ/ı“: "KERİM" soll wie "Kerim" erkannt werden
+const foldName = (s) => String(s).replace(/[İıI]/g, 'i').replace(/\u0307/g, '');
+
 const AMOUNT_BEFORE = /(?:\+|sprit(?:geld)?|fahrgeld|fahrtgeld|fahrtkosten|benzin|extra)\s*:?\s*\+?\s*$/i;
 const AMOUNT_AFTER = /^\s*(?:€|eur\b|euro\b)/i;
 /** Sieht die Zahl wie ein Betrag aus ("Fahrgeld 7.5", "+7.5", "7.5 €")? Dann ist sie kein Datum. */
@@ -371,13 +395,13 @@ function looksLikeAmount(s, m) {
 /** Erstes gültiges Datum in der Zeile: { m (Treffer zum Entfernen), d (epochDay) } */
 function findDate(s, today) {
   for (const re of [DATE_RE, DATE_SLASH]) {
-    for (const m of s.matchAll(re)) {
+    for (const m of matchesOf(re, s)) {
       if (looksLikeAmount(s, m)) continue;
       const d = toDate(+m[1], +m[2], m[3] || '', today);
       if (d != null) return { m, d };
     }
   }
-  for (const m of s.matchAll(DATE_NAME)) {
+  for (const m of matchesOf(DATE_NAME, s)) {
     const key = m[2].toLowerCase().slice(0, 3);
     const month = MONTH_NUM[key];
     const d = month ? toDate(+m[1], month, m[3] || '', today) : null;
@@ -387,7 +411,7 @@ function findDate(s, today) {
 }
 
 function findAmount(s) {
-  const m = PLUS_AMOUNT.exec(s) || WORD_AMOUNT.exec(s) || EURO_AMOUNT.exec(s);
+  const m = PLUS_AMOUNT.exec(s) || WORD_AMOUNT.exec(s) || firstOf(EURO_AMOUNT, s);
   return m ? { m, v: parseFloat(m[1].replace(',', '.')) || 0 } : null;
 }
 
@@ -409,9 +433,11 @@ export const RosterParser = {
    * looksOwn = in den Schichtzeilen stehen keine weiteren Namen (dann vorausgewählt).
    */
   parse(text, names, today = todayDay()) {
-    const nameRes = names.filter((n) => n.trim()).map((n) => new RegExp('(?<![\\p{L}\\d])' + escapeRe(n.trim()) + '(?![\\p{L}\\d])', 'iu'));
+    const nameRes = names.filter((n) => n.trim()).map((n) => new RegExp(escapeRe(foldName(n.trim())) + '(?![\\p{L}\\d])', 'iu'));
+    const NAME_BAD = /[\p{L}\d]/u;
+    const hasName = (l) => { const f = foldName(l); return nameRes.some((r) => firstOf(r, f, NAME_BAD)); };
     const lines = String(text).split(/\r?\n/).map((raw) => raw.replace(WHATSAPP_PREFIX, '').replace(WHATSAPP_EXPORT, '').replace(/[  ]/g, ' ').trim());
-    const noName = !lines.some((l) => nameRes.some((r) => r.test(l)));
+    const noName = !lines.some(hasName);
     const shifts = [];
     const unrecognized = [];
     let looksOwn = true;
@@ -421,12 +447,19 @@ export const RosterParser = {
     let pendingTime = null;
     let pendingAmount = null;
     let lastShiftLine = -10;
+    let timeLine = -10;
+    let prevLine = -10;
     const resetBlock = () => { pendingTime = null; pendingAmount = null; };
+    const nextLine = (i) => { for (let j = i + 1; j < lines.length; j++) if (lines[j]) return lines[j]; return ''; };
+    // Datumszeile ohne Uhrzeit = Beginn eines Blocks
+    const isBlockStart = (l) => !!l && !hasName(l) && !firstOf(TIME_RANGE, l) && (firstOf(DATE_ISO, l) || findDate(l, today)) != null;
 
     lines.forEach((line, idx) => {
       if (!line) return;
+      const before = prevLine;
+      prevLine = idx;
       // ISO-Datum zuerst herausnehmen, sonst sähe "2026-11-20" wie eine Uhrzeit aus
-      const iso = DATE_ISO.exec(line);
+      const iso = firstOf(DATE_ISO, line);
       let isoDate = null;
       let work = line;
       if (iso && validDate(+iso[1], +iso[2], +iso[3])) {
@@ -434,7 +467,7 @@ export const RosterParser = {
         work = removeRange(line, iso);
       }
       let time = null;
-      for (const m of work.matchAll(TIME_RANGE)) {
+      for (const m of matchesOf(TIME_RANGE, work)) {
         const r = parseRange(m);
         if (r) { time = { m, r }; break; }
       }
@@ -445,7 +478,7 @@ export const RosterParser = {
       const amount = am ? am.v : null;
       const extraWords = hasNames(am ? removeRange(restForMoney, am.m) : restForMoney);
       // Überschrift ganz oben mit Zahlenbereich, z. B. "Halle 3-4 Objekt": ist eine Tätigkeit, keine Uhrzeit
-      const hasMyName = nameRes.some((r) => r.test(line));
+      const hasMyName = hasName(line);
       if (time && !dateMatch && currentDate == null && !shifts.length && !hasMyName && amount == null &&
           extraWords && /^\p{L}/u.test(line) && line.length <= 60) {
         currentActivity = line;
@@ -456,27 +489,40 @@ export const RosterParser = {
       const mine = noName ? !!time : hasMyName;
 
       if (!mine) {
-        if (dateMatch) { currentDate = dateMatch.d; resetBlock(); }
+        if (dateMatch) {
+          currentDate = dateMatch.d;
+          resetBlock();
+          // Betrag in der Datumszeile ("So 22.11. +5€") gilt für den Block darunter
+          if (!time && amount != null) pendingAmount = amount;
+        }
         if (time) {
           // Nur reine Zeitzeilen ("11-16 Uhr") gelten für den Block – nicht Zeilen mit anderen Namen
           if (!extraWords) {
             pendingTime = time.r;
-            pendingAmount = amount;
+            pendingAmount = amount ?? pendingAmount;
+            timeLine = idx;
           }
           return;
         }
         if (dateMatch) return;
         if (amount != null) {
           // Betrag in eigener Zeile direkt unter der eigenen Schicht ("5€ extra")
-          if (noName && lastShiftLine === idx - 1 && shifts.length && !shifts.at(-1).allowance) {
-            shifts.at(-1).allowance = amount;
+          if (noName && lastShiftLine === idx - 1 && shifts.length && !shifts[shifts.length - 1].allowance) {
+            shifts[shifts.length - 1].allowance = amount;
             lastShiftLine = idx;
           } else pendingAmount = amount;
           return;
         }
         // Ohne eigenen Namen: Namenszeile direkt unter einer Schicht -> Gruppenplan, nicht vorauswählen
         if (noName && lastShiftLine === idx - 1) { looksOwn = false; return; }
-        if (LETTERS.test(line) && !/^\d/.test(line) && line.length <= 60) { currentActivity = line; resetBlock(); }
+        // Tätigkeit nur aus einer Überschrift: ganz oben oder direkt über einem Block (Datumszeile ohne Uhrzeit).
+        // Namenszeilen anderer ("Fuat Enes" unter "18-23 Uhr") und Hinweise ("Bitte Ausweis mitnehmen") nicht.
+        if (LETTERS.test(line) && !/^\d/.test(line) && line.length <= 60) {
+          const top = !shifts.length && currentDate == null && pendingTime == null;
+          const namesOfBlock = pendingTime != null && before === timeLine;
+          const underDate = pendingTime == null && before >= 0 && isBlockStart(lines[before]);
+          if (top || underDate || (!namesOfBlock && isBlockStart(nextLine(idx)))) { currentActivity = line; resetBlock(); }
+        }
         return;
       }
 
@@ -574,10 +620,18 @@ export function normalizeExportConfig(cfg) {
     c.totalAllowanceOn = false;
     c.totalsDefaultOff = true;
   }
+  // Kaputte Werte (z. B. aus einem fremden oder beschädigten Backup) durch den Standard ersetzen,
+  // sonst stürzt die PDF-Seite ab und lässt sich in der App nicht mehr reparieren
+  for (const k of Object.keys(d)) {
+    if (k !== 'columns' && typeof c[k] !== typeof d[k]) c[k] = d[k];
+  }
   const seen = new Map();
-  for (const col of c.columns || []) {
-    if (!COLUMNS.some((x) => x[0] === col.id) || seen.has(col.id)) continue;
-    seen.set(col.id, Object.assign(defaultColumn(col.id), col));
+  for (const col of Array.isArray(c.columns) ? c.columns : []) {
+    if (!col || typeof col !== 'object' || !COLUMNS.some((x) => x[0] === col.id) || seen.has(col.id)) continue;
+    const def = defaultColumn(col.id);
+    const merged = Object.assign({}, def, col);
+    for (const k of Object.keys(def)) if (typeof merged[k] !== typeof def[k]) merged[k] = def[k];
+    seen.set(col.id, merged);
   }
   for (const [id] of COLUMNS) if (!seen.has(id)) seen.set(id, defaultColumn(id));
   c.columns = [...seen.values()];
@@ -589,6 +643,8 @@ export const ExportBuilder = {
   /** months: [{ month, entries, profile }] */
   build(fileBaseName, months, cfg0) {
     const cfg = normalizeExportConfig(cfg0);
+    // Überstunden nur, wenn irgendwo Soll-Stunden eingetragen sind (sonst ist der Schalter auch ausgeblendet)
+    if (!months.some((d) => d.profile?.targetMinutes > 0)) cfg.overtimeOn = false;
     return {
       fileBaseName,
       widthPercent: cfg.widthPercent,

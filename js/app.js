@@ -63,8 +63,8 @@ async function appMenu(extra = []) {
 function startYear() {
   const years = Q.years(true);
   if (!years.length) return null;
-  const now = new Date().getFullYear();
-  return years.includes(now) ? now : years[0];
+  // Immer das aktuelle Jahr – auch im Januar, wenn es noch leer ist (Plus legt dann den ersten Monat an)
+  return new Date().getFullYear();
 }
 
 function yearScreen(year) {
@@ -157,7 +157,7 @@ function monthScreen(id, ctx) {
     const entries = filtered();
     const next = Shifts.next(state.entries, nowStamp());
     if (!ctx.restored && Months.contains(month, todayDay()) && entries.length) {
-      const target = root.querySelector(`[data-entry="${next?.monthId === id ? next.id : entries.at(-1).id}"]`);
+      const target = root.querySelector(`[data-entry="${next?.monthId === id ? next.id : entries[entries.length - 1].id}"]`);
       target?.scrollIntoView({ block: 'center' });
     }
   }
@@ -256,7 +256,7 @@ function common(act) {
     case 'newmonth': return go(`month-edit/new/${a}`);
     case 'monthmenu': return monthMenu(+a);
     case 'search': return go('search');
-    case 'fabmenu': return fabMenu(a, b);
+    case 'fabmenu': return document.querySelector('.fab-menu-wrap') ? closeFabMenu() : fabMenu(a, b);
   }
 }
 

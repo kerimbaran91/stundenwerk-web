@@ -37,7 +37,7 @@ function homeScreen() {
         return statsCard({ title: String(y), subtitle: ms.length === 1 ? '1 Monat' : `${ms.length} Monate`, st, decimal: s.decimalHours, act: `year:${y}`, badge: y === nextYear ? 'Nächste Schicht' : '' });
       }).join('')}
     </main>
-    ${fab('newmonth:' + new Date().getFullYear(), 'Monat hinzufügen')}
+    ${fab('fabmenu:month:' + new Date().getFullYear(), 'Hinzufügen')}
     ${state.months.length ? summaryBar(total, s.decimalHours) : ''}`;
   return { homemenu: () => appMenu() };
 }
@@ -94,7 +94,7 @@ function yearScreen(year) {
         badge: next && next.monthId === m.id ? 'Nächste Schicht · ' + Shifts.label(next, now) : '',
       })).join('')}
     </main>
-    ${fab('newmonth:' + year, 'Monat hinzufügen')}
+    ${fab('fabmenu:month:' + year, 'Hinzufügen')}
     ${months.length ? summaryBar(st, s.decimalHours) : ''}`;
   return {
     back: () => back(''),
@@ -139,7 +139,7 @@ function monthScreen(id, ctx) {
       ${ctx.searching ? `<input class="search" id="q" type="search" placeholder="Suchen: Tätigkeit, Notiz, Datum …" value="${esc(ctx.query || '')}">` : ''}
       <div id="results" class="results">${results()}</div>
     </main>
-    ${fab(`newday:${id}`, 'Tag hinzufügen')}
+    ${fab(`fabmenu:day:${id}`, 'Hinzufügen')}
     ${summaryBar(st, s.decimalHours)}`;
 
   const qi = root.querySelector('#q');
@@ -223,6 +223,29 @@ async function monthMenu(id) {
   }
 }
 
+/** Kleines Menü über dem Plus: bisherige Aktion (Monat bzw. Tag hinzufügen) + Dienstplan einfügen */
+function fabMenu(kind, ref) {
+  closeFabMenu();
+  const wrap = document.createElement('div');
+  wrap.className = 'fab-menu-wrap';
+  wrap.innerHTML = `<div class="fab-menu">
+      <button class="fab-item" data-fab="roster">${icon('paste')}<span>Dienstplan einfügen</span></button>
+      <button class="fab-item" data-fab="add">${icon('add')}<span>${kind === 'day' ? 'Tag hinzufügen' : 'Monat hinzufügen'}</span></button>
+    </div>`;
+  wrap.addEventListener('click', (ev) => {
+    const b = ev.target.closest('[data-fab]');
+    closeFabMenu();
+    if (b?.dataset.fab === 'roster') go('roster');
+    if (b?.dataset.fab === 'add') go(kind === 'day' ? `day/${ref}/new` : `month-edit/new/${ref}`);
+  });
+  document.body.appendChild(wrap);
+  document.querySelector('.fab')?.classList.add('open');
+}
+function closeFabMenu() {
+  document.querySelectorAll('.fab-menu-wrap').forEach((x) => x.remove());
+  document.querySelector('.fab')?.classList.remove('open');
+}
+
 function common(act) {
   const [name, a, b] = act.split(':');
   switch (name) {
@@ -233,6 +256,7 @@ function common(act) {
     case 'newmonth': return go(`month-edit/new/${a}`);
     case 'monthmenu': return monthMenu(+a);
     case 'search': return go('search');
+    case 'fabmenu': return fabMenu(a, b);
   }
 }
 
@@ -258,7 +282,7 @@ export function render() {
   const formRoutes = ['day', 'month-edit', 'roster', 'export', 'settings'];
   if (!fresh && formRoutes.includes(r[0])) return;
 
-  document.querySelectorAll('.modal-wrap, .sheet-wrap').forEach((x) => fresh && x.remove());
+  document.querySelectorAll('.modal-wrap, .sheet-wrap, .fab-menu-wrap').forEach((x) => fresh && x.remove());
   try {
     switch (r[0]) {
       case undefined: handlers = homeScreen(); break;
